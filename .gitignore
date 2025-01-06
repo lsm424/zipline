@@ -1,0 +1,5 @@
+*.log
+minute/
+db/
+.vscode/
+nohup.out
