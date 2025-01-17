@@ -399,7 +399,7 @@ def _make_bundle_core():
             # cache directory if the load fails in the middle
             if bundle.create_writers:
                 wd = stack.enter_context(
-                    working_dir(pth.data_path([], environ=environ))
+                    working_dir(pth.data_path([], environ=environ), prefix=environ.get('TEMPDIR', None))
                 )
                 daily_bars_path = wd.ensure_dir(*daily_equity_relative(name, timestr))
                 daily_bar_writer = BcolzDailyBarWriter(

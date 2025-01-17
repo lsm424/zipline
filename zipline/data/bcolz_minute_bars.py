@@ -15,10 +15,11 @@ from tzlocal import get_localzone
 import json
 import logging
 import os
+import time
 from abc import ABC, abstractmethod
 from glob import glob
 from os.path import join
-
+from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, ProcessPoolExecutor, FIRST_COMPLETED, wait
 import bcolz
 import numpy as np
 import pandas as pd
@@ -655,8 +656,11 @@ class BcolzMinuteBarWriter:
         )
         write_sid = self.write_sid
         with ctx as it:
-            for e in it:
-                write_sid(*e, invalid_data_behavior=invalid_data_behavior)
+            executor = ProcessPoolExecutor(max_workers=40)
+            r = [executor.submit(write_sid, e[0], e[1], invalid_data_behavior) for e in it]
+            r, _ = wait(r, return_when=ALL_COMPLETED)
+            # for e in it:
+            #     write_sid(*e, invalid_data_behavior=invalid_data_behavior)
 
     def write_sid(self, sid, df, invalid_data_behavior="warn"):
         """Write the OHLCV data for the given sid.
@@ -678,7 +682,7 @@ class BcolzMinuteBarWriter:
                 volume : float64|int64
             index : DatetimeIndex of market minutes.
         """
-        print(f'write sid {sid}')
+        start = time.time()
         cols = {
             "open": df.open.values,
             "high": df.high.values,
@@ -690,6 +694,7 @@ class BcolzMinuteBarWriter:
         # Call internal method, since DataFrame has already ensured matching
         # index and value lengths.
         self._write_cols(sid, dts, cols, invalid_data_behavior)
+        print(f'write sid {sid}, {time.time() - start}')
 
     def write_cols(self, sid, dts, cols, invalid_data_behavior="warn"):
         """Write the OHLCV data for the given sid.

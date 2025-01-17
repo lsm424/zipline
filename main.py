@@ -44,15 +44,19 @@ register(
 )
 os.environ['QUANDL_API_KEY'] = 'y87uEYuxHxDFW5Mp1zRx'
 os.environ["CSVDIR"] = '.'
+os.environ["TEMPDIR"] = '/data/zipline/tmp/'
+os.environ['ZIPLINE_ROOT'] = '/data/zipline'
 # result = CliRunner().invoke(ingest, ['--bundle', 'quandl', '--assets-version', '1'])
-ingest('csvdir', assets_versions=[1])
+# ingest('csvdir', assets_versions=[1])
 
 # 加载你所用的 bundle 数据
 bundle_data = bundles.load('csvdir')  # 根据你使用的 Bundle 调整名称
 # 获取 AssetFinder
 asset_finder = bundle_data.asset_finder
 # 获取所有资产
-syms = asset_finder.retrieve_all(range(5384))
+asset_cnt = 5384
+asset_cnt = 2982
+syms = asset_finder.retrieve_all(range(asset_cnt))
 
 data = DataPortal(
     bundle_data.asset_finder,
@@ -79,7 +83,7 @@ def initialize(context):
     context.close_time = calendar.close_times[0][1]
     context.break_start_time = calendar.break_start_times[0][1]
     context.break_end_time = calendar.break_end_times[0][1]
-    context.middle = 5384 // 2
+    context.middle = asset_cnt // 2
 
 
 def handle_data(context, data):
@@ -94,7 +98,8 @@ def handle_data(context, data):
     start = time.time()
     prices = data.current(context.syms, 'price')
     read_time = time.time()
-    prices = prices.sort_values()
+    prices = prices[prices.notnull()].sort_values()
+    context.middle = len(prices) // 2
     sort_time = time.time()
     sym = prices.index[context.middle]
     median_price = prices[context.middle]
@@ -108,7 +113,7 @@ def handle_data(context, data):
 # result = CliRunner().invoke(run, ['-f', 'zipline_pro.py', '--trading-calendar', 'XSHG', '--start', '2025-10-09', '--end',
 #                                   '2025-12-31', '--data-frequency', 'minute', '--bundle', 'csvdir', '--benchmark-sid', '0', '-o', 'dma.pickle'])
 # run_algorithm(
-#     start=pd.Timestamp('2024-10-09'),
+#     start=pd.Timestamp('2017-08-04'),
 #     end=pd.Timestamp('2024-12-31'),
 #     trading_calendar=calendar,
 #     initialize=initialize,
@@ -118,4 +123,19 @@ def handle_data(context, data):
 #     capital_base=10e6,
 #     output='dma.pickle',
 # )
+run_algorithm(
+    start=pd.Timestamp('2024-01-19'),
+    end=pd.Timestamp('2024-04-30'),
+    trading_calendar=calendar,
+    initialize=initialize,
+    handle_data=handle_data,
+    data_frequency='minute',
+    bundle='csvdir',
+    capital_base=10e6,
+    output='dma.pickle',
+)
 logger.info(f"耗时：{time.time() - start}s")
+
+
+# mprof run main.py 启动内存实时采集
+# mprof plot mprofile_20250107193820.dat  画内存曲线图

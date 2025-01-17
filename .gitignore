@@ -3,3 +3,4 @@ minute/
 db/
 .vscode/
 nohup.out
+*.pyc

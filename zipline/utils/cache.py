@@ -346,7 +346,7 @@ class working_dir:
     """
 
     def __init__(self, final_path, *args, **kwargs):
-        self.path = mkdtemp()
+        self.path = mkdtemp(prefix=kwargs.get('prefix', None))
         self._final_path = final_path
 
     def ensure_dir(self, *path_parts):

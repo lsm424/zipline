@@ -40,7 +40,7 @@ def gen_data(stock, recent_60_days):
     # df = ak.stock_zh_a_minute(symbol=stock, period="1", adjust="qfq", start_date=recent_60_days[0], end_date=recent_60_days[-1])
     data = list(map(lambda x: gen_stock(stock, x), recent_60_days))
     data = pd.concat(data)
-    data.to_csv(f'minute/{stock}.csv')
+    data.to_csv(f'/data/minute/{stock}.csv')
     print(f'{stock} done')
 
 
@@ -52,6 +52,6 @@ if __name__ == '__main__':
     recent_60_days = sorted(filter(lambda x: x < now, recent_60_days), reverse=True)[:60 * 30]
     stocks = ak.stock_info_a_code_name()['code'].to_list()
 
-    with ProcessPoolExecutor(max_workers=100, mp_context=get_context('fork')) as executor:
+    with ProcessPoolExecutor(max_workers=150, mp_context=get_context('fork')) as executor:
         futures = [executor.submit(gen_data, arg, recent_60_days) for arg in stocks]
         results = [f.result() for f in futures]

@@ -4,12 +4,14 @@ Module for building a complete dataset from local directory with csv files.
 
 import os
 import sys
-
+import time
 import logging
 import numpy as np
 import pandas as pd
 from zipline.utils.calendar_utils import register_calendar_alias
 from zipline.utils.cli import maybe_show_progress
+import queue
+from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, ProcessPoolExecutor, FIRST_COMPLETED, as_completed, wait
 
 from . import core as bundles
 
@@ -187,7 +189,64 @@ def csvdir_bundle(
         )
 
 
+def _read_csv(sid, symbol, fnames, csvdir, divs_splits):
+    start = time.time()
+    logger.debug(f"{symbol}: sid {sid}")
+    fname = fnames.get(symbol, None)
+
+    if fname is None:
+        raise ValueError(f"{symbol}.csv file is not in {csvdir}")
+
+    # NOTE: read_csv can also read compressed csv files
+    dfr = pd.read_csv(
+        os.path.join(csvdir, fname),
+        parse_dates=[0],
+        index_col=0,
+    ).sort_index()
+
+    # start_date = dfr.index[0]
+    # end_date = dfr.index[-1]
+
+    # # The auto_close date is the day after the last trade.
+    # ac_date = end_date + pd.Timedelta(days=1)
+    # metadata.iloc[sid] = start_date, end_date, ac_date, symbol
+
+    if "split" in dfr.columns:
+        tmp = 1.0 / dfr[dfr["split"] != 1.0]["split"]
+        split = pd.DataFrame(
+            data=tmp.index.tolist(), columns=["effective_date"]
+        )
+        split["ratio"] = tmp.tolist()
+        split["sid"] = sid
+
+        splits = divs_splits["splits"]
+        index = pd.Index(
+            range(splits.shape[0], splits.shape[0] + split.shape[0])
+        )
+        split.set_index(index, inplace=True)
+        divs_splits["splits"] = pd.concat([splits, split], axis=0)
+
+    if "dividend" in dfr.columns:
+        # ex_date   amount  sid record_date declared_date pay_date
+        tmp = dfr[dfr["dividend"] != 0.0]["dividend"]
+        div = pd.DataFrame(data=tmp.index.tolist(), columns=["ex_date"])
+        div["record_date"] = pd.NaT
+        div["declared_date"] = pd.NaT
+        div["pay_date"] = pd.NaT
+        div["amount"] = tmp.tolist()
+        div["sid"] = sid
+
+        divs = divs_splits["divs"]
+        ind = pd.Index(range(divs.shape[0], divs.shape[0] + div.shape[0]))
+        div.set_index(ind, inplace=True)
+        divs_splits["divs"] = pd.concat([divs, div], axis=0)
+    # print(f'yield {symbol} {time.time() - start}')
+    return sid, dfr, symbol
+
+
 def _pricing_iter(csvdir, symbols, metadata, divs_splits, show_progress):
+    executor = ProcessPoolExecutor(max_workers=190)
+    tasks = []
     with maybe_show_progress(
         symbols, show_progress, label="Loading custom pricing data: "
     ) as it:
@@ -198,56 +257,67 @@ def _pricing_iter(csvdir, symbols, metadata, divs_splits, show_progress):
         fnames = {f.name.split(".")[0]: f.name for f in files if f.is_file()}
 
         for sid, symbol in enumerate(it):
-            logger.debug(f"{symbol}: sid {sid}")
-            fname = fnames.get(symbol, None)
+            # start = time.time()
+            # logger.debug(f"{symbol}: sid {sid}")
+            # fname = fnames.get(symbol, None)
 
-            if fname is None:
-                raise ValueError(f"{symbol}.csv file is not in {csvdir}")
+            # if fname is None:
+            #     raise ValueError(f"{symbol}.csv file is not in {csvdir}")
 
-            # NOTE: read_csv can also read compressed csv files
-            dfr = pd.read_csv(
-                os.path.join(csvdir, fname),
-                parse_dates=[0],
-                index_col=0,
-            ).sort_index()
+            # # NOTE: read_csv can also read compressed csv files
+            # dfr = pd.read_csv(
+            #     os.path.join(csvdir, fname),
+            #     parse_dates=[0],
+            #     index_col=0,
+            # ).sort_index()
 
+            # start_date = dfr.index[0]
+            # end_date = dfr.index[-1]
+
+            # # The auto_close date is the day after the last trade.
+            # ac_date = end_date + pd.Timedelta(days=1)
+            # metadata.iloc[sid] = start_date, end_date, ac_date, symbol
+
+            # if "split" in dfr.columns:
+            #     tmp = 1.0 / dfr[dfr["split"] != 1.0]["split"]
+            #     split = pd.DataFrame(
+            #         data=tmp.index.tolist(), columns=["effective_date"]
+            #     )
+            #     split["ratio"] = tmp.tolist()
+            #     split["sid"] = sid
+
+            #     splits = divs_splits["splits"]
+            #     index = pd.Index(
+            #         range(splits.shape[0], splits.shape[0] + split.shape[0])
+            #     )
+            #     split.set_index(index, inplace=True)
+            #     divs_splits["splits"] = pd.concat([splits, split], axis=0)
+
+            # if "dividend" in dfr.columns:
+            #     # ex_date   amount  sid record_date declared_date pay_date
+            #     tmp = dfr[dfr["dividend"] != 0.0]["dividend"]
+            #     div = pd.DataFrame(data=tmp.index.tolist(), columns=["ex_date"])
+            #     div["record_date"] = pd.NaT
+            #     div["declared_date"] = pd.NaT
+            #     div["pay_date"] = pd.NaT
+            #     div["amount"] = tmp.tolist()
+            #     div["sid"] = sid
+
+            #     divs = divs_splits["divs"]
+            #     ind = pd.Index(range(divs.shape[0], divs.shape[0] + div.shape[0]))
+            #     div.set_index(ind, inplace=True)
+            #     divs_splits["divs"] = pd.concat([divs, div], axis=0)
+            # print(f'yield {symbol} {time.time() - start}')
+            # yield sid, dfr
+            tasks.append(executor.submit(_read_csv, sid, symbol, fnames, csvdir, divs_splits))
+
+        for idx, task in enumerate(as_completed(tasks)):
+            sid, dfr, symbol = task.result()
             start_date = dfr.index[0]
             end_date = dfr.index[-1]
-
-            # The auto_close date is the day after the last trade.
             ac_date = end_date + pd.Timedelta(days=1)
             metadata.iloc[sid] = start_date, end_date, ac_date, symbol
-
-            if "split" in dfr.columns:
-                tmp = 1.0 / dfr[dfr["split"] != 1.0]["split"]
-                split = pd.DataFrame(
-                    data=tmp.index.tolist(), columns=["effective_date"]
-                )
-                split["ratio"] = tmp.tolist()
-                split["sid"] = sid
-
-                splits = divs_splits["splits"]
-                index = pd.Index(
-                    range(splits.shape[0], splits.shape[0] + split.shape[0])
-                )
-                split.set_index(index, inplace=True)
-                divs_splits["splits"] = pd.concat([splits, split], axis=0)
-
-            if "dividend" in dfr.columns:
-                # ex_date   amount  sid record_date declared_date pay_date
-                tmp = dfr[dfr["dividend"] != 0.0]["dividend"]
-                div = pd.DataFrame(data=tmp.index.tolist(), columns=["ex_date"])
-                div["record_date"] = pd.NaT
-                div["declared_date"] = pd.NaT
-                div["pay_date"] = pd.NaT
-                div["amount"] = tmp.tolist()
-                div["sid"] = sid
-
-                divs = divs_splits["divs"]
-                ind = pd.Index(range(divs.shape[0], divs.shape[0] + div.shape[0]))
-                div.set_index(ind, inplace=True)
-                divs_splits["divs"] = pd.concat([divs, div], axis=0)
-
+            print(f"yield {idx}: sid {sid}")
             yield sid, dfr
 
 
