@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
 from tzlocal import get_localzone
 import json
 import logging
@@ -20,6 +21,7 @@ from abc import ABC, abstractmethod
 from glob import glob
 from os.path import join
 from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, ProcessPoolExecutor, FIRST_COMPLETED, wait
+import multiprocessing
 import bcolz
 import numpy as np
 import pandas as pd
@@ -126,19 +128,17 @@ def convert_cols(cols, scale_factor, sid, invalid_data_behavior):
         If 'warn', logs a warning and filters out incompatible values.
         If 'ignore', silently filters out incompatible values.
     """
-    scaled_opens = (np.nan_to_num(cols["open"]) * scale_factor).round()
-    scaled_highs = (np.nan_to_num(cols["high"]) * scale_factor).round()
-    scaled_lows = (np.nan_to_num(cols["low"]) * scale_factor).round()
-    scaled_closes = (np.nan_to_num(cols["close"]) * scale_factor).round()
+    scaled_col_names = ("open", "high", "low", "close")
+    scaled_cols = {x: (np.nan_to_num(cols[x]) * scale_factor).round() for x in scaled_col_names if x in cols}
+    exclude_mask = np.zeros_like(list(scaled_cols.values())[0], dtype=bool) if len(scaled_cols) != 0 else None
+    # scaled_opens = (np.nan_to_num(cols["open"]) * scale_factor).round()
+    # scaled_highs = (np.nan_to_num(cols["high"]) * scale_factor).round()
+    # scaled_lows = (np.nan_to_num(cols["low"]) * scale_factor).round()
+    # scaled_closes = (np.nan_to_num(cols["close"]) * scale_factor).round()
 
-    exclude_mask = np.zeros_like(scaled_opens, dtype=bool)
+    # exclude_mask = np.zeros_like(scaled_cols[0], dtype=bool)
 
-    for col_name, scaled_col in [
-        ("open", scaled_opens),
-        ("high", scaled_highs),
-        ("low", scaled_lows),
-        ("close", scaled_closes),
-    ]:
+    for col_name, scaled_col in scaled_cols.items():
         max_val = scaled_col.max()
 
         try:
@@ -161,20 +161,26 @@ def convert_cols(cols, scale_factor, sid, invalid_data_behavior):
             exclude_mask &= scaled_col >= np.iinfo(np.uint32).max
 
     # Convert all cols to uint32.
-    opens = scaled_opens.astype(np.uint32)
-    highs = scaled_highs.astype(np.uint32)
-    lows = scaled_lows.astype(np.uint32)
-    closes = scaled_closes.astype(np.uint32)
-    volumes = cols["volume"].astype(np.uint32)
+    ret = []
+    for x in cols:
+        col = scaled_cols.get(x, cols[x]).astype(np.uint32)
+        col[exclude_mask] = 0
+        ret.append(col)
+    return ret
+    # opens = scaled_opens.astype(np.uint32)
+    # highs = scaled_highs.astype(np.uint32)
+    # lows = scaled_lows.astype(np.uint32)
+    # closes = scaled_closes.astype(np.uint32)
+    # volumes = cols["volume"].astype(np.uint32)
 
     # Exclude rows with unsafe values by setting to zero.
-    opens[exclude_mask] = 0
-    highs[exclude_mask] = 0
-    lows[exclude_mask] = 0
-    closes[exclude_mask] = 0
-    volumes[exclude_mask] = 0
+    # opens[exclude_mask] = 0
+    # highs[exclude_mask] = 0
+    # lows[exclude_mask] = 0
+    # closes[exclude_mask] = 0
+    # volumes[exclude_mask] = 0
 
-    return opens, highs, lows, closes, volumes
+    # return opens, highs, lows, closes, volumes
 
 
 class BcolzMinuteBarMetadata:
@@ -418,6 +424,8 @@ class BcolzMinuteBarWriter:
         expectedlen=DEFAULT_EXPECTEDLEN,
         write_metadata=True,
     ):
+        self.col_names = os.environ.get('fields', None)
+        self.col_names = self.col_names.split(',') if self.col_names else BcolzMinuteBarWriter.COL_NAMES
 
         self._rootdir = rootdir
         self._start_session = start_session
@@ -546,14 +554,9 @@ class BcolzMinuteBarWriter:
         initial_array = np.empty(0, np.uint32)
         table = ctable(
             rootdir=path,
-            columns=[
-                initial_array,
-                initial_array,
-                initial_array,
-                initial_array,
-                initial_array,
-            ],
-            names=["open", "high", "low", "close", "volume"],
+            columns=[initial_array] * len(self.col_names),
+            # names=["open", "high", "low", "close", "volume"],
+            names=self.col_names,
             expectedlen=self._expectedlen,
             mode="w",
         )
@@ -576,7 +579,7 @@ class BcolzMinuteBarWriter:
 
         prepend_array = np.zeros(num_to_prepend, np.uint32)
         # Fill all OHLCV with zeros.
-        table.append([prepend_array] * 5)
+        table.append([prepend_array] * len(self.col_names))
         table.flush()
 
     def pad(self, sid, date):
@@ -656,7 +659,7 @@ class BcolzMinuteBarWriter:
         )
         write_sid = self.write_sid
         with ctx as it:
-            executor = ProcessPoolExecutor(max_workers=40)
+            executor = ProcessPoolExecutor(max_workers=multiprocessing.cpu_count() * 4)
             r = [executor.submit(write_sid, e[0], e[1], invalid_data_behavior) for e in it]
             r, _ = wait(r, return_when=ALL_COMPLETED)
             # for e in it:
@@ -683,14 +686,15 @@ class BcolzMinuteBarWriter:
             index : DatetimeIndex of market minutes.
         """
         start = time.time()
-        cols = {
-            "open": df.open.values,
-            "high": df.high.values,
-            "low": df.low.values,
-            "close": df.close.values,
-            "volume": df.volume.values,
-        }
-        dts = df.index.values
+        # cols = {
+        #     "open": df.open.values,
+        #     "high": df.high.values,
+        #     "low": df.low.values,
+        #     "close": df.close.values,
+        #     "volume": df.volume.values,
+        # }
+        cols = {k: df[k].values for k in self.col_names}
+        dts = df.index
         # Call internal method, since DataFrame has already ensured matching
         # index and value lengths.
         self._write_cols(sid, dts, cols, invalid_data_behavior)
@@ -717,13 +721,13 @@ class BcolzMinuteBarWriter:
             close : float64
             volume : float64|int64
         """
-        if not all(len(dts) == len(cols[name]) for name in self.COL_NAMES):
+        if not all(len(dts) == len(cols[name]) for name in self.col_names):
             raise BcolzMinuteWriterColumnMismatch(
                 "Length of dts={0} should match cols: {1}".format(
                     len(dts),
                     " ".join(
                         "{0}={1}".format(name, len(cols[name]))
-                        for name in self.COL_NAMES
+                        for name in self.col_names
                     ),
                 )
             )
@@ -751,7 +755,7 @@ class BcolzMinuteBarWriter:
 
         tds = self._session_labels
         input_first_day = self._calendar.minute_to_session(
-            pd.Timestamp(dts[0]), direction="previous"
+            dts[0], direction="previous"
         )
 
         last_date = self.last_date_in_output_for_sid(sid)
@@ -766,12 +770,13 @@ class BcolzMinuteBarWriter:
 
         all_minutes = self._minute_index
         # Get the latest minute we wish to write to the ctable
-        try:
-            # ensure tz-aware Timestamp has tz UTC
-            last_minute_to_write = pd.Timestamp(dts[-1]).tz_convert(tz=get_localzone())
-        except TypeError:
-            # if naive, instead convert timestamp to UTC
-            last_minute_to_write = pd.Timestamp(dts[-1]).tz_localize(tz=get_localzone())
+        last_minute_to_write = dts[-1]
+        # try:
+        #     # ensure tz-aware Timestamp has tz UTC
+        #     last_minute_to_write = pd.Timestamp(dts[-1]).tz_convert(tz=get_localzone())
+        # except TypeError:
+        #     # if naive, instead convert timestamp to UTC
+        #     last_minute_to_write = pd.Timestamp(dts[-1]).tz_localize(tz=get_localzone())
 
         # In the event that we've already written some minutely data to the
         # ctable, guard against overwriting that data.
@@ -792,27 +797,30 @@ class BcolzMinuteBarWriter:
 
         minutes_count = all_minutes_in_window.size
 
-        open_col = np.zeros(minutes_count, dtype=np.uint32)
-        high_col = np.zeros(minutes_count, dtype=np.uint32)
-        low_col = np.zeros(minutes_count, dtype=np.uint32)
-        close_col = np.zeros(minutes_count, dtype=np.uint32)
-        vol_col = np.zeros(minutes_count, dtype=np.uint32)
+        bolz_cols = list(map(lambda x: np.zeros(minutes_count, dtype=np.uint32), cols))
+        # open_col = np.zeros(minutes_count, dtype=np.uint32)
+        # high_col = np.zeros(minutes_count, dtype=np.uint32)
+        # low_col = np.zeros(minutes_count, dtype=np.uint32)
+        # close_col = np.zeros(minutes_count, dtype=np.uint32)
+        # vol_col = np.zeros(minutes_count, dtype=np.uint32)
 
         dt_ixs = np.searchsorted(
-            all_minutes_in_window.values, pd.Index(dts).tz_localize(get_localzone()).values
+            all_minutes_in_window.values, dts.values
         )
 
         ohlc_ratio = self.ohlc_ratio_for_sid(sid)
 
-        (
-            open_col[dt_ixs],
-            high_col[dt_ixs],
-            low_col[dt_ixs],
-            close_col[dt_ixs],
-            vol_col[dt_ixs],
-        ) = convert_cols(cols, ohlc_ratio, sid, invalid_data_behavior)
+        for idx, col in enumerate(convert_cols(cols, ohlc_ratio, sid, invalid_data_behavior)):
+            bolz_cols[idx][dt_ixs] = col
+        # (
+        #     open_col[dt_ixs],
+        #     high_col[dt_ixs],
+        #     low_col[dt_ixs],
+        #     close_col[dt_ixs],
+        #     vol_col[dt_ixs],
+        # ) = convert_cols(cols, ohlc_ratio, sid, invalid_data_behavior)
 
-        table.append([open_col, high_col, low_col, close_col, vol_col])
+        table.append(bolz_cols)
         table.flush()
 
     def data_len_for_day(self, day):
@@ -866,14 +874,8 @@ class BcolzMinuteBarReader(MinuteBarReader):
     zipline.data.minute_bars.BcolzMinuteBarWriter
     """
 
-    FIELDS = ("open", "high", "low", "close", "volume")
-    DEFAULT_MINUTELY_SID_CACHE_SIZES = {
-        "close": 6000,
-        "open": 1550,
-        "high": 1550,
-        "low": 1550,
-        "volume": 6000,
-    }
+    FIELDS = os.environ.get('fields', '').split(',') if os.environ.get('fields', None) else ("open", "high", "low", "close", "volume")
+    DEFAULT_MINUTELY_SID_CACHE_SIZES = {x: int(os.environ.get('lru_size', 3000)) for x in FIELDS}
     assert set(FIELDS) == set(
         DEFAULT_MINUTELY_SID_CACHE_SIZES
     ), "FIELDS should match DEFAULT_MINUTELY_SID_CACHE_SIZES keys"
@@ -1106,7 +1108,7 @@ class BcolzMinuteBarReader(MinuteBarReader):
             else:
                 return np.nan
 
-        if field != "volume":
+        if field in ('open', 'high', 'low', 'close'):
             value *= self._ohlc_ratio_inverse_for_sid(sid)
         return value
 

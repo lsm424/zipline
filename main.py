@@ -1,12 +1,18 @@
+# 环境变量的设置要在zipline库引入之前
+import os  # NOQA: E402
+os.environ['fields'] = "open,high,low,close,volume,real_time"    # NOQA: E402
+os.environ['lru_size'] = '6000'  # NOQA: E402
+os.environ["CSVDIR"] = '.'  # NOQA: E402
+os.environ["TEMPDIR"] = '/data/zipline/tmp/'  # NOQA: E402
+os.environ['ZIPLINE_ROOT'] = '/data/zipline'  # NOQA: E402
+
 import pickle
 from tzlocal import get_localzone
 from click.testing import CliRunner
 import pandas as pd
-import os
 from zipline import TradingAlgorithm
 from zipline.__main__ import run
 from zipline.data.bundles import register, ingest
-# from zipline.__main__ import ingest, run
 from zipline.api import order_target, record, symbol, set_symbol_lookup_date
 from zipline.data.data_portal import DataPortal
 from zipline.finance import commission, slippage
@@ -19,8 +25,9 @@ from zipline.data import bundles
 from zipline.assets import AssetFinder
 import time
 import loguru
-import pandas as pd
 import pysnooper
+
+# from zipline.__main__ import ingest, run
 loguru.logger.add("./zipline.log", colorize=True, level="INFO", encoding="utf-8", retention="5 days", rotation="1 day", enqueue=True)
 logger = loguru.logger
 start = time.time()
@@ -42,10 +49,7 @@ register(
     # start_session=pd.Timestamp('2023-01-01'),
     # end_session=pd.Timestamp('2023-12-31'),
 )
-os.environ['QUANDL_API_KEY'] = 'y87uEYuxHxDFW5Mp1zRx'
-os.environ["CSVDIR"] = '.'
-os.environ["TEMPDIR"] = '/data/zipline/tmp/'
-os.environ['ZIPLINE_ROOT'] = '/data/zipline'
+# os.environ['QUANDL_API_KEY'] = 'y87uEYuxHxDFW5Mp1zRx'
 # result = CliRunner().invoke(ingest, ['--bundle', 'quandl', '--assets-version', '1'])
 # ingest('csvdir', assets_versions=[1])
 
@@ -54,8 +58,8 @@ bundle_data = bundles.load('csvdir')  # 根据你使用的 Bundle 调整名称
 # 获取 AssetFinder
 asset_finder = bundle_data.asset_finder
 # 获取所有资产
-asset_cnt = 5384
-asset_cnt = 2982
+asset_cnt = 5393
+# asset_cnt = 2982
 syms = asset_finder.retrieve_all(range(asset_cnt))
 
 data = DataPortal(
@@ -96,13 +100,13 @@ def handle_data(context, data):
         return
 
     start = time.time()
-    prices = data.current(context.syms, 'price')
+    prices = data.current(context.syms, ['price', 'real_time'])
     read_time = time.time()
-    prices = prices[prices.notnull()].sort_values()
-    context.middle = len(prices) // 2
+    prices = prices[prices.notnull()].sort_values(by='price')
+    middle = len(prices) // 2
     sort_time = time.time()
-    sym = prices.index[context.middle]
-    median_price = prices[context.middle]
+    sym = prices.index[middle]
+    median_price = prices['price'][middle]
     available_cash = context.portfolio.cash
     shares_to_buy = int(available_cash // median_price)
     if shares_to_buy > 0:
@@ -124,8 +128,8 @@ def handle_data(context, data):
 #     output='dma.pickle',
 # )
 run_algorithm(
-    start=pd.Timestamp('2024-01-19'),
-    end=pd.Timestamp('2024-04-30'),
+    start=pd.Timestamp('2024-11-20'),
+    end=pd.Timestamp('2024-12-31'),
     trading_calendar=calendar,
     initialize=initialize,
     handle_data=handle_data,

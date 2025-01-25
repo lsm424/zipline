@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
 from operator import mul
 from functools import lru_cache
 import logging
@@ -59,23 +60,28 @@ from zipline.errors import HistoryWindowStartsBeforeData
 
 log = logging.getLogger("DataPortal")
 
-BASE_FIELDS = frozenset(
-    [
-        "open",
-        "high",
-        "low",
-        "close",
-        "volume",
-        "price",
-        "contract",
-        "sid",
-        "last_traded",
-    ]
-)
+BASE_FIELDS = [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "price",
+    "contract",
+    "sid",
+    "last_traded",
+]
+if os.environ.get('fields', None):
+    BASE_FIELDS = os.environ.get('fields', '').split(',') + ['contract', 'sid', 'last_traded', 'price']
+BASE_FIELDS = frozenset(BASE_FIELDS)
 
 OHLCV_FIELDS = frozenset(["open", "high", "low", "close", "volume"])
+if os.environ.get('fields', None):
+    OHLCV_FIELDS = frozenset(os.environ.get('fields', '').split(','))
 
 OHLCVP_FIELDS = frozenset(["open", "high", "low", "close", "volume", "price"])
+if os.environ.get('fields', None):
+    OHLCVP_FIELDS = frozenset(os.environ.get('fields', '').split(',') + ['price'])
 
 HISTORY_FREQUENCIES = set(["1m", "1d"])
 

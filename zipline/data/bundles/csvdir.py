@@ -12,7 +12,7 @@ from zipline.utils.calendar_utils import register_calendar_alias
 from zipline.utils.cli import maybe_show_progress
 import queue
 from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, ProcessPoolExecutor, FIRST_COMPLETED, as_completed, wait
-
+import multiprocessing
 from . import core as bundles
 
 handler = logging.StreamHandler()
@@ -245,7 +245,7 @@ def _read_csv(sid, symbol, fnames, csvdir, divs_splits):
 
 
 def _pricing_iter(csvdir, symbols, metadata, divs_splits, show_progress):
-    executor = ProcessPoolExecutor(max_workers=190)
+    executor = ProcessPoolExecutor(max_workers=multiprocessing.cpu_count() * 3)
     tasks = []
     with maybe_show_progress(
         symbols, show_progress, label="Loading custom pricing data: "

@@ -4,3 +4,4 @@ db/
 .vscode/
 nohup.out
 *.pyc
+*.pickle
