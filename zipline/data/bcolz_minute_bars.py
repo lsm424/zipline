@@ -659,7 +659,7 @@ class BcolzMinuteBarWriter:
         )
         write_sid = self.write_sid
         with ctx as it:
-            executor = ProcessPoolExecutor(max_workers=multiprocessing.cpu_count() * 4)
+            executor = ProcessPoolExecutor(max_workers=multiprocessing.cpu_count() * 5)
             r = [executor.submit(write_sid, e[0], e[1], invalid_data_behavior) for e in it]
             r, _ = wait(r, return_when=ALL_COMPLETED)
             # for e in it:
@@ -698,7 +698,7 @@ class BcolzMinuteBarWriter:
         # Call internal method, since DataFrame has already ensured matching
         # index and value lengths.
         self._write_cols(sid, dts, cols, invalid_data_behavior)
-        print(f'write sid {sid}, {time.time() - start}')
+        print(f'write sid {sid}, used {time.time() - start}s')
 
     def write_cols(self, sid, dts, cols, invalid_data_behavior="warn"):
         """Write the OHLCV data for the given sid.
@@ -771,6 +771,10 @@ class BcolzMinuteBarWriter:
         all_minutes = self._minute_index
         # Get the latest minute we wish to write to the ctable
         last_minute_to_write = dts[-1]
+        if last_minute_to_write.tzinfo is None:
+            last_minute_to_write = pd.Timestamp(last_minute_to_write).tz_localize(
+                tz=get_localzone()
+            )
         # try:
         #     # ensure tz-aware Timestamp has tz UTC
         #     last_minute_to_write = pd.Timestamp(dts[-1]).tz_convert(tz=get_localzone())

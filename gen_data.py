@@ -3,6 +3,7 @@ from datetime import datetime
 import itertools
 from multiprocessing import get_context
 import multiprocessing
+import os
 import akshare as ak
 import pandas as pd
 import numpy as np
@@ -53,7 +54,7 @@ if __name__ == '__main__':
     recent_60_days = map(lambda x: x.strftime('%Y-%m-%d'), trade_days)
     recent_60_days = sorted(filter(lambda x: x < now, recent_60_days), reverse=True)[:1 * 30]
     stocks = ak.stock_info_a_code_name()['code'].to_list()
-
+    os.system('rm -rf minute; mkdir -p minute')
     cnt = multiprocessing.cpu_count() * 2
     with ProcessPoolExecutor(max_workers=cnt, mp_context=get_context('fork')) as executor:
         futures = [executor.submit(gen_data, arg, recent_60_days) for arg in stocks]

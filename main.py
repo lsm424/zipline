@@ -49,18 +49,17 @@ register(
     # start_session=pd.Timestamp('2023-01-01'),
     # end_session=pd.Timestamp('2023-12-31'),
 )
-# os.environ['QUANDL_API_KEY'] = 'y87uEYuxHxDFW5Mp1zRx'
-# result = CliRunner().invoke(ingest, ['--bundle', 'quandl', '--assets-version', '1'])
-# ingest('csvdir', assets_versions=[1])
+
+ingest('csvdir', assets_versions=[1])
 
 # 加载你所用的 bundle 数据
 bundle_data = bundles.load('csvdir')  # 根据你使用的 Bundle 调整名称
 # 获取 AssetFinder
 asset_finder = bundle_data.asset_finder
 # 获取所有资产
-asset_cnt = 5393
+asset_cnt = 10000
 # asset_cnt = 2982
-syms = asset_finder.retrieve_all(range(asset_cnt))
+syms = list(filter(lambda x: x, asset_finder.retrieve_all(range(asset_cnt), True)))
 
 data = DataPortal(
     bundle_data.asset_finder,
@@ -100,8 +99,9 @@ def handle_data(context, data):
         return
 
     start = time.time()
-    prices = data.current(context.syms, ['price', 'real_time'])
+    prices = data.current(context.syms, 'price')
     read_time = time.time()
+    real_time = data.current(context.syms[0], 'real_time')
     prices = prices[prices.notnull()].sort_values(by='price')
     middle = len(prices) // 2
     sort_time = time.time()
@@ -110,7 +110,7 @@ def handle_data(context, data):
     available_cash = context.portfolio.cash
     shares_to_buy = int(available_cash // median_price)
     if shares_to_buy > 0:
-        order_target(sym, shares_to_buy)
+        order_target(sym, shares_to_buy, real_time=real_time)
     logger.info(f"{data.current_dt} 全仓买入 {shares_to_buy} 股 {sym}，总耗时：{time.time() - start}s，读取耗时：{read_time - start}，排序耗时：{sort_time - read_time}，available_cash：{available_cash}")
 
 
@@ -127,17 +127,17 @@ def handle_data(context, data):
 #     capital_base=10e6,
 #     output='dma.pickle',
 # )
-run_algorithm(
-    start=pd.Timestamp('2024-11-20'),
-    end=pd.Timestamp('2024-12-31'),
-    trading_calendar=calendar,
-    initialize=initialize,
-    handle_data=handle_data,
-    data_frequency='minute',
-    bundle='csvdir',
-    capital_base=10e6,
-    output='dma.pickle',
-)
+# run_algorithm(
+#     start=pd.Timestamp('2024-11-20'),
+#     end=pd.Timestamp('2024-12-31'),
+#     trading_calendar=calendar,
+#     initialize=initialize,
+#     handle_data=handle_data,
+#     data_frequency='minute',
+#     bundle='csvdir',
+#     capital_base=10e6,
+#     output='dma.pickle',
+# )
 logger.info(f"耗时：{time.time() - start}s")
 
 

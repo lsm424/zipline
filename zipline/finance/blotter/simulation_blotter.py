@@ -96,7 +96,7 @@ class SimulationBlotter(Blotter):
         )
 
     @expect_types(asset=Asset)
-    def order(self, asset, amount, style, order_id=None):
+    def order(self, asset, amount, style, order_id=None, real_time=None):
         """Place an order.
 
         Parameters
