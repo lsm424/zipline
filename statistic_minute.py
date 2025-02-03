@@ -8,6 +8,7 @@ from pandas import Timedelta
 import dask.dataframe as dd
 from dask.distributed import Client
 import pandas as pd
+from functools import reduce
 from pandarallel import pandarallel
 import time
 from filelock import FileLock
@@ -33,7 +34,6 @@ all_timestamps = pd.to_datetime(np.concatenate([
     for a, b in zip(calendar.first_pm_minutes, calendar.last_minutes)
 ]))
 all_timestamps = list(all_timestamps + pd.Timedelta(hours=8))
-# result = pd.Series(pd.to_datetime(all_timestamps))
 
 
 def decompress_bz2(source_path, file='snap.csv'):
@@ -120,6 +120,7 @@ base_minute = pd.Timestamp('1990-01-01 09:30:00')
 @lru_cache(maxsize=10000)
 def calc_minute(cur_second: pd.Timestamp, base_second: pd.Timestamp) -> pd.Timestamp:
     # 计算start和base之间秒级的tick数
+    # cur_second = cur_second.replace(tzinfo=datetime.timezone.utc) + datetime.timedelta(hours=8)
     days = (cur_second - base_second).days
     start_time = cur_second.time()
     ticks = days * seconds_per_day + time_to_seconds(start_time) - time_to_seconds(market_open_morning) - 1
@@ -196,13 +197,16 @@ def analys_vaxe(file, date=None, base_second=None, idx=0):
         df['real_time'] = df['time_sec'] + date_second
         df = df.drop('time_sec')
         # 映射分钟级时间
-        df['time'] = df['real_time'].astype('int64').astype("datetime64[s]").apply(lambda x: calc_minute(x, base_second))
+        df['time'] = (df['real_time'].astype('int64').astype("datetime64[s]") + (8 * 3600)).apply(lambda x: calc_minute(x, base_second))
         logger.info(f'[{idx}]{file} statistic groupby {time.time() - start} {df.shape}')
         # 分股票写文件
-        df.to_pandas_df().groupby(['stock'], sort=False).parallel_apply(_save)
+        df = df.to_pandas_df()
+        df.groupby(['stock'], sort=False).parallel_apply(_save)
         logger.info(f'[{idx}]finish {file} {time.time() - start} {df.shape}')
+        return df['time'].max(), df['time'].min()
     except Exception as e:
         logger.error(f'[{idx}] error {file} {time.time() - start} {e} {traceback.format_exc()}')
+        return None
 
 
 if __name__ == '__main__':
@@ -223,7 +227,7 @@ if __name__ == '__main__':
         files = find_files(rootdir, 'trade.csv')
         start_date, end_date = args.start, args.end
         # start_date = '20230101'
-        # end_date = '20230103'
+        # end_date = '20230104'
         print(start_date, end_date)
         if start_date:
             files = list(filter(lambda x: os.path.basename(os.path.dirname(x)) >= start_date, files))
@@ -240,5 +244,8 @@ if __name__ == '__main__':
             os.system(f'rm {resultdir} -rf && mkdir {resultdir}')
             # analys_vaxe('/data/sse/20231111/trade.csv',  base_second=pd.Timestamp('20231111' + ' 09:30:00'))
             futures = [executor.submit(analys_vaxe, arg, base_second=base_second, idx=idx) for idx, arg in enumerate(files)]
-            wait(futures, return_when=ALL_COMPLETED)
-        logger.info(f'finish {time.time() - start}')
+            r, _ = wait(futures, return_when=ALL_COMPLETED)
+            r = [x for x in [x.result() for x in r] if x]
+            r = list(zip(*r))
+            max_date, min_date = max(r[0]), min(r[1])
+        logger.info(f'finish {time.time() - start}, max_date: {max_date}, min_date: {min_date}')

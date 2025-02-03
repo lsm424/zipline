@@ -1261,7 +1261,7 @@ class TradingAlgorithm:
         amount, style = self._calculate_order(
             asset, amount, limit_price, stop_price, style
         )
-        return self.blotter.order(asset, amount, style, real_time)
+        return self.blotter.order(asset, amount, style, real_time=real_time)
 
     def _calculate_order(
         self, asset, amount, limit_price=None, stop_price=None, style=None

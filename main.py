@@ -50,7 +50,7 @@ register(
     # end_session=pd.Timestamp('2023-12-31'),
 )
 
-ingest('csvdir', assets_versions=[1])
+# ingest('csvdir', assets_versions=[1])
 
 # 加载你所用的 bundle 数据
 bundle_data = bundles.load('csvdir')  # 根据你使用的 Bundle 调整名称
@@ -100,13 +100,15 @@ def handle_data(context, data):
 
     start = time.time()
     prices = data.current(context.syms, 'price')
+    prices = prices[prices.notnull()].sort_values()
+    if prices.empty:
+        return
     read_time = time.time()
-    real_time = data.current(context.syms[0], 'real_time')
-    prices = prices[prices.notnull()].sort_values(by='price')
+    real_time = data.current(prices.index[0], 'real_time')
     middle = len(prices) // 2
     sort_time = time.time()
     sym = prices.index[middle]
-    median_price = prices['price'][middle]
+    median_price = prices[middle]
     available_cash = context.portfolio.cash
     shares_to_buy = int(available_cash // median_price)
     if shares_to_buy > 0:
@@ -127,17 +129,17 @@ def handle_data(context, data):
 #     capital_base=10e6,
 #     output='dma.pickle',
 # )
-# run_algorithm(
-#     start=pd.Timestamp('2024-11-20'),
-#     end=pd.Timestamp('2024-12-31'),
-#     trading_calendar=calendar,
-#     initialize=initialize,
-#     handle_data=handle_data,
-#     data_frequency='minute',
-#     bundle='csvdir',
-#     capital_base=10e6,
-#     output='dma.pickle',
-# )
+run_algorithm(
+    start=pd.Timestamp('1991-06-24'),
+    end=pd.Timestamp('1992-06-02'),
+    trading_calendar=calendar,
+    initialize=initialize,
+    handle_data=handle_data,
+    data_frequency='minute',
+    bundle='csvdir',
+    capital_base=10e6,
+    output='dma.pickle',
+)
 logger.info(f"耗时：{time.time() - start}s")
 
 
