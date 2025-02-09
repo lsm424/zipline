@@ -16,6 +16,8 @@ import logging
 from collections import defaultdict
 from copy import copy
 
+import pandas as pd
+
 from zipline.assets import Equity, Future, Asset
 from .blotter import Blotter
 from zipline.extensions import register
@@ -96,7 +98,7 @@ class SimulationBlotter(Blotter):
         )
 
     @expect_types(asset=Asset)
-    def order(self, asset, amount, style, order_id=None):
+    def order(self, asset, amount, style, order_id=None, real_time=None):
         """Place an order.
 
         Parameters
@@ -139,10 +141,10 @@ class SimulationBlotter(Blotter):
             # Arbitrary limit of 100 billion (US) shares will never be
             # exceeded except by a buggy algorithm.
             raise OverflowError("Can't order more than %d shares" % self.max_shares)
-
+        dt = self.current_dt if not real_time else pd.Timestamp(real_time, unit='s')
         is_buy = amount > 0
         order = Order(
-            dt=self.current_dt,
+            dt=dt,
             asset=asset,
             amount=amount,
             stop=style.get_stop_price(is_buy),

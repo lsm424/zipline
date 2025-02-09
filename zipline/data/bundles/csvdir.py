@@ -8,6 +8,7 @@ import time
 import logging
 import numpy as np
 import pandas as pd
+from tzlocal import get_localzone
 from zipline.utils.calendar_utils import register_calendar_alias
 from zipline.utils.cli import maybe_show_progress
 import queue
@@ -152,7 +153,7 @@ def csvdir_bundle(
         ddir = os.path.join(csvdir, tframe)
 
         symbols = sorted(
-            item.split(".csv")[0] for item in os.listdir(ddir) if ".csv" in item
+            item.split(".csv")[0] for item in os.listdir(ddir) if item.endswith('.csv')
         )
         if not symbols:
             raise ValueError("no <symbol>.csv* files found in %s" % ddir)
@@ -191,8 +192,8 @@ def csvdir_bundle(
 
 def _read_csv(sid, symbol, fnames, csvdir, divs_splits):
     start = time.time()
-    logger.debug(f"{symbol}: sid {sid}")
     fname = fnames.get(symbol, None)
+    logger.debug(f"{symbol}: sid {sid}, fname: {fname}")
 
     if fname is None:
         raise ValueError(f"{symbol}.csv file is not in {csvdir}")
@@ -203,7 +204,8 @@ def _read_csv(sid, symbol, fnames, csvdir, divs_splits):
         parse_dates=[0],
         index_col=0,
     ).sort_index()
-
+    if dfr.index.tzinfo is None:
+        dfr.index = dfr.index.tz_localize(tz=get_localzone())
     # start_date = dfr.index[0]
     # end_date = dfr.index[-1]
 
@@ -245,7 +247,8 @@ def _read_csv(sid, symbol, fnames, csvdir, divs_splits):
 
 
 def _pricing_iter(csvdir, symbols, metadata, divs_splits, show_progress):
-    executor = ProcessPoolExecutor(max_workers=multiprocessing.cpu_count() * 3)
+    executor = ProcessPoolExecutor(max_workers=multiprocessing.cpu_count() * 4)
+    # executor = ProcessPoolExecutor(max_workers=1)
     tasks = []
     with maybe_show_progress(
         symbols, show_progress, label="Loading custom pricing data: "
@@ -254,7 +257,7 @@ def _pricing_iter(csvdir, symbols, metadata, divs_splits, show_progress):
         files = os.scandir(csvdir)
         # building a dictionary of filenames
         # NOTE: if there are duplicates it will arbitrarily pick the latest found
-        fnames = {f.name.split(".")[0]: f.name for f in files if f.is_file()}
+        fnames = {f.name.split(".")[0]: f.name for f in files if f.is_file() and f.name.endswith(".csv")}
 
         for sid, symbol in enumerate(it):
             # start = time.time()

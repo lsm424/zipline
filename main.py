@@ -1,144 +1,82 @@
-# 环境变量的设置要在zipline库引入之前
-import os  # NOQA: E402
-os.environ['fields'] = "open,high,low,close,volume,real_time"    # NOQA: E402
-os.environ['lru_size'] = '6000'  # NOQA: E402
-os.environ["CSVDIR"] = '.'  # NOQA: E402
-os.environ["TEMPDIR"] = '/data/zipline/tmp/'  # NOQA: E402
-os.environ['ZIPLINE_ROOT'] = '/data/zipline'  # NOQA: E402
-
-import pickle
-from tzlocal import get_localzone
-from click.testing import CliRunner
+import argparse
+import os
+from exchange_calendars import get_calendar
 import pandas as pd
-from zipline import TradingAlgorithm
-from zipline.__main__ import run
-from zipline.data.bundles import register, ingest
-from zipline.api import order_target, record, symbol, set_symbol_lookup_date
-from zipline.data.data_portal import DataPortal
-from zipline.finance import commission, slippage
-from zipline.utils.calendar_utils import get_calendar
-from zipline.data.bcolz_minute_bars import BcolzMinuteBarWriter
-from zipline.api import order, record, symbol
-from zipline.data.bundles.csvdir import csvdir_bundle
-from zipline import run_algorithm
-from zipline.data import bundles
-from zipline.assets import AssetFinder
+from statistic_trade_csv import decompress_dir, statistic_trade, calendar  # NOQA: E402
+from gen_test_data import gen_stock
 import time
 import loguru
-import pysnooper
 
-# from zipline.__main__ import ingest, run
-loguru.logger.add("./zipline.log", colorize=True, level="INFO", encoding="utf-8", retention="5 days", rotation="1 day", enqueue=True)
+loguru.logger.add("./zipline.log", colorize=False, level="INFO", encoding="utf-8", retention="5 days", rotation="1 day", enqueue=True)
 logger = loguru.logger
-start = time.time()
 
-# if os.path.exists('dma.pickle'):
-#     results = pickle.load(open('dma.pickle', 'r'))
-#     results = pd.read_pickle('dma.pickle')
-#     logger.info(results.describe())
+parser = argparse.ArgumentParser(description='基于zipline的回测框架。支持从trade.csv生成分钟级数据，并进行ingest和回测')
+parser.add_argument('--start', type=str, default=None, help='从该起始日期统计trade.csv，仅在type为statistic有效，非必填', required=False)
+parser.add_argument('--end', type=str, default=None, help='统计trade.csv的结束日期，仅在type为statistic有效，非必填', required=False)
+parser.add_argument('--type', type=str, default='algo', help='操作类型：statistic为从trade.csv统计分钟级数据；decompress为解压出trade.csv；ingest为执行ingest操作；algo为运行回测；gen_test为生成测试数据。默认algo',
+                    choices=['statistic', 'decompress', 'ingest', 'algo', 'gen_test'])
+parser.add_argument('--days', type=int, default=60, help='type为gen_test有效，生成多少天的数据，非必填', required=False)
+parser.add_argument('--rootdir', type=str, default='/data/sse/', help='数据根目录，默认/data/sse/', required=False)
+parser.add_argument('--csvdir', type=str, default='./minute', help='生成的分钟级数据目录，默认./minute', required=False)
+parser.add_argument('--tempdir', type=str, default='/data/zipline/tmp/', help='zipline ingest过程中的临时目录，默认/data/zipline/tmp/', required=False)
+parser.add_argument('--zipline_root', type=str, default='/data/zipline', help='zipline数据的目录，默认/data/zipline', required=False)
+parser.add_argument('--fields', type=str, default='open,high,low,close,volume,real_time', help='zipline ingest过程中使用的字段，默认open,high,low,close,volume,real_time', required=False)
+parser.add_argument('--lru_size', type=str, default='6000', help='zipline回测过程中使用的lru_size，默认6000', required=False)
+args = parser.parse_args()
 
-
-calendar = get_calendar('XSHG')
-
-
-register(
-    'csvdir',
-    csvdir_bundle,
-    calendar_name='XSHG',
-    minutes_per_day=330,
-    # start_session=pd.Timestamp('2023-01-01'),
-    # end_session=pd.Timestamp('2023-12-31'),
-)
-# os.environ['QUANDL_API_KEY'] = 'y87uEYuxHxDFW5Mp1zRx'
-# result = CliRunner().invoke(ingest, ['--bundle', 'quandl', '--assets-version', '1'])
-# ingest('csvdir', assets_versions=[1])
-
-# 加载你所用的 bundle 数据
-bundle_data = bundles.load('csvdir')  # 根据你使用的 Bundle 调整名称
-# 获取 AssetFinder
-asset_finder = bundle_data.asset_finder
-# 获取所有资产
-asset_cnt = 5393
-# asset_cnt = 2982
-syms = asset_finder.retrieve_all(range(asset_cnt))
-
-data = DataPortal(
-    bundle_data.asset_finder,
-    trading_calendar=calendar,
-    first_trading_day=bundle_data.equity_minute_bar_reader.first_trading_day,
-    equity_minute_reader=bundle_data.equity_minute_bar_reader,
-    equity_daily_reader=bundle_data.equity_daily_bar_reader,
-    adjustment_reader=bundle_data.adjustment_reader,
-    future_minute_reader=bundle_data.equity_minute_bar_reader,
-    future_daily_reader=bundle_data.equity_daily_bar_reader,
-)
-
-
-def test():
-    dt = pd.Timestamp('2024-10-09 09:31:00', tz=get_localzone())
-    for sym in syms:
-        ret = data.get_spot_value(sym, 'price', dt, 'minute')
-
-
-def initialize(context):
-    context.i = 0
-    context.syms = syms
-    context.open_time = calendar.open_times[0][1]
-    context.close_time = calendar.close_times[0][1]
-    context.break_start_time = calendar.break_start_times[0][1]
-    context.break_end_time = calendar.break_end_times[0][1]
-    context.middle = asset_cnt // 2
-
-
-def handle_data(context, data):
-    if context.i == 0:
-        data.current(context.syms, 'volumn')
-
-    context.i += 1
-    cur_time = data.current_dt.time()
-    if cur_time < context.open_time or cur_time > context.close_time or context.break_start_time < cur_time <= context.break_end_time:
-        return
-
-    start = time.time()
-    prices = data.current(context.syms, ['price', 'real_time'])
-    read_time = time.time()
-    prices = prices[prices.notnull()].sort_values(by='price')
-    middle = len(prices) // 2
-    sort_time = time.time()
-    sym = prices.index[middle]
-    median_price = prices['price'][middle]
-    available_cash = context.portfolio.cash
-    shares_to_buy = int(available_cash // median_price)
-    if shares_to_buy > 0:
-        order_target(sym, shares_to_buy)
-    logger.info(f"{data.current_dt} 全仓买入 {shares_to_buy} 股 {sym}，总耗时：{time.time() - start}s，读取耗时：{read_time - start}，排序耗时：{sort_time - read_time}，available_cash：{available_cash}")
-
-
-# result = CliRunner().invoke(run, ['-f', 'zipline_pro.py', '--trading-calendar', 'XSHG', '--start', '2025-10-09', '--end',
-#                                   '2025-12-31', '--data-frequency', 'minute', '--bundle', 'csvdir', '--benchmark-sid', '0', '-o', 'dma.pickle'])
-# run_algorithm(
-#     start=pd.Timestamp('2017-08-04'),
-#     end=pd.Timestamp('2024-12-31'),
-#     trading_calendar=calendar,
-#     initialize=initialize,
-#     handle_data=handle_data,
-#     data_frequency='minute',
-#     bundle='csvdir',
-#     capital_base=10e6,
-#     output='dma.pickle',
-# )
-run_algorithm(
-    start=pd.Timestamp('2024-11-20'),
-    end=pd.Timestamp('2024-12-31'),
-    trading_calendar=calendar,
-    initialize=initialize,
-    handle_data=handle_data,
-    data_frequency='minute',
-    bundle='csvdir',
-    capital_base=10e6,
-    output='dma.pickle',
-)
-logger.info(f"耗时：{time.time() - start}s")
+if __name__ == '__main__':
+    start_time = time.time()
+    run_type = args.type
+    if run_type == 'statistic':
+        logger.info(f'开始统计trade.csv，起始日期：{args.start}, 结束日期：{args.end}，保存到{args.csvdir}')
+        start_date, end_date = args.start, args.end
+        statistic_trade(start_date, end_date, args.csvdir, args.rootdir)
+    elif run_type == 'decompress':
+        logger.info(f'开始解压trade.csv，保存到{args.csvdir}')
+        logger.info(decompress_dir(args.csvdir, 0, 0, 'trade.csv.tar.bz2', 'trade.csv'))
+    elif run_type == 'gen_test':
+        logger.info(f'准备生成测试数据，共{args.days}天')
+        gen_stock(args.days)
+    elif run_type == 'ingest':
+        logger.info(f'开始执行ingest操作，原始csv数据在{args.csvdir}, 保存到{args.zipline_root}，字段为{args.fields}')
+        # 环境变量的设置要在zipline库引入之前
+        os.environ["CSVDIR"] = os.path.dirname(args.csvdir)  # NOQA: E402
+        os.environ["TEMPDIR"] = args.tempdir  # NOQA: E402
+        os.environ['ZIPLINE_ROOT'] = args.zipline_root  # NOQA: E402
+        os.environ['fields'] = args.fields    # NOQA: E402
+        from zipline.data.bundles.csvdir import csvdir_bundle
+        from zipline.data.bundles import register, ingest
+        register(
+            'csvdir',
+            csvdir_bundle,
+            calendar_name='XSHG',
+            minutes_per_day=330,
+        )
+        ingest('csvdir', assets_versions=[1])
+    elif run_type == 'algo':
+        # result = CliRunner().invoke(run, ['-f', 'zipline_pro.py', '--trading-calendar', 'XSHG', '--start', '2025-10-09', '--end',
+        #                                   '2025-12-31', '--data-frequency', 'minute', '--bundle', 'csvdir', '--benchmark-sid', '0', '-o', 'dma.pickle'])
+        # 环境变量的设置要在zipline库引入之前
+        os.environ['fields'] = args.fields    # NOQA: E402
+        os.environ['lru_size'] = args.lru_size  # NOQA: E402
+        os.environ['ZIPLINE_ROOT'] = args.zipline_root  # NOQA: E402
+        from zipline import run_algorithm
+        from algo import initialize, handle_data, records
+        start = args.start if args.start else records.start_date.min().strftime('%Y%m%d')
+        end = args.end if args.end else records.end_date.max().strftime('%Y%m%d')
+        logger.info(f'执行回测，起始日期：{start}, 结束日期：{end}, fields: {args.fields}, lru size: {args.lru_size}')
+        run_algorithm(
+            start=pd.Timestamp(start),
+            end=pd.Timestamp(end),
+            trading_calendar=calendar,
+            initialize=initialize,
+            handle_data=handle_data,
+            data_frequency='minute',
+            bundle='csvdir',
+            capital_base=10e6,
+            output='dma.pickle',
+        )
+    logger.info(f"type: {run_type}，耗时：{time.time() - start_time}s")
 
 
 # mprof run main.py 启动内存实时采集
