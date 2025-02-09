@@ -4,9 +4,9 @@ from exchange_calendars import get_calendar
 import numpy as np
 from tzlocal import get_localzone
 import traceback
-from pandas import Timedelta
-import dask.dataframe as dd
-from dask.distributed import Client
+# from pandas import Timedelta
+# import dask.dataframe as dd
+# from dask.distributed import Client
 import pandas as pd
 from functools import reduce
 from pandarallel import pandarallel
@@ -18,22 +18,26 @@ import os
 from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, ProcessPoolExecutor, FIRST_COMPLETED, wait
 import loguru
 # import swifter
-import polars as pl
+# import polars as pl
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-loguru.logger.add("./zipline.log", level="INFO", encoding="utf-8", retention="5 days", rotation="1 day", enqueue=True)
+# loguru.logger.add("./zipline.log", level="INFO", encoding="utf-8", retention="5 days", rotation="1 day", enqueue=True)
 logger = loguru.logger
 
 calendar = get_calendar('XSHG', start=pd.Timestamp("1991-01-01"), side='right')
+first_minutes = calendar.first_minutes.apply(lambda x: x.replace(hour=1, minute=31, second=0))
+last_am_minutes = calendar.last_am_minutes.apply(lambda x: x.replace(hour=3, minute=30, second=0))
+first_pm_minutes = calendar.first_pm_minutes.apply(lambda x: x.replace(hour=5, minute=1, second=0))
+last_minutes = calendar.last_minutes.apply(lambda x: x.replace(hour=7, minute=00, second=0))
 all_timestamps = pd.to_datetime(np.concatenate([
     np.arange(a.value, b.value + 1, (10**9) * 60)  # 10**9 是 1 秒的纳秒数
-    for a, b in zip(calendar.first_minutes, calendar.last_am_minutes)
+    for a, b in zip(first_minutes, last_am_minutes)
 ] + [
     np.arange(a.value, b.value + 1, (10**9) * 60)  # 10**9 是 1 秒的纳秒数
-    for a, b in zip(calendar.first_pm_minutes, calendar.last_minutes)
+    for a, b in zip(first_pm_minutes, last_minutes)
 ]))
-all_timestamps = list(all_timestamps + pd.Timedelta(hours=8))
+all_timestamps = sorted(all_timestamps + pd.Timedelta(hours=8))
 
 
 def decompress_bz2(source_path, file='snap.csv'):
@@ -68,12 +72,12 @@ def decompress_dir(rootdir, start=0, count=0, bzfile='snap.csv.tar.bz2', file='s
     wait(r, return_when=ALL_COMPLETED)
 
 
-def _save(df: pd.DataFrame):
+def _save(df: pd.DataFrame, resultdir):
     stock = df['stock'].iloc[0]
     df = df.drop('stock', axis=1)
     df.reset_index()
     df.set_index('time', inplace=True)
-    file = f'minute/{stock}.csv'
+    file = f'{resultdir}/{stock}.csv'
     lock = FileLock(file + '.lock')
     with lock.acquire(timeout=-1):
         header = not os.path.exists(file)
@@ -147,7 +151,7 @@ config = {
 }
 
 
-def analys_vaxe(file, date=None, base_second=None, idx=0):
+def analys_vaxe(file, date=None, base_second=None, idx=0, resultdir='minute'):
     pandarallel.initialize(progress_bar=True)  # 启用进度条，并设置4个并行进程
 
     def _to_second(time_int):
@@ -201,12 +205,38 @@ def analys_vaxe(file, date=None, base_second=None, idx=0):
         logger.info(f'[{idx}]{file} statistic groupby {time.time() - start} {df.shape}')
         # 分股票写文件
         df = df.to_pandas_df()
-        df.groupby(['stock'], sort=False).parallel_apply(_save)
+        df.groupby(['stock'], sort=False).parallel_apply(lambda x: _save(x, resultdir))
         logger.info(f'[{idx}]finish {file} {time.time() - start} {df.shape}')
         return df['time'].max(), df['time'].min()
     except Exception as e:
         logger.error(f'[{idx}] error {file} {time.time() - start} {e} {traceback.format_exc()}')
         return None
+
+
+def statistic_trade(start_date, end_date, resultdir, rootdir):
+    start = time.time()
+    files = find_files(rootdir, 'trade.csv')
+    print(start_date, end_date)
+    if start_date:
+        files = list(filter(lambda x: os.path.basename(os.path.dirname(x)) >= start_date, files))
+    if end_date:
+        files = list(filter(lambda x: os.path.basename(os.path.dirname(x)) <= end_date, files))
+    files = sorted(files)
+    base_second = pd.Timestamp(min(map(lambda x: os.path.basename(os.path.dirname(x)), files)) + ' 09:30:00')
+    # a = calc_minute(base_second + Timedelta(seconds=1), base_second)
+    a = calc_minute(pd.Timestamp(datetime.datetime.fromtimestamp(1704159178).strftime("%Y-%m-%d %H:%M:%S")), base_second)
+    a = calc_minute(pd.Timestamp(datetime.datetime.fromtimestamp(1704159181).strftime("%Y-%m-%d %H:%M:%S")), base_second)
+    logger.info(f'files: {files}, count: {len(files)}, base_second: {base_second}')
+    with ProcessPoolExecutor(max_workers=12) as executor:
+        os.system(f'rm {resultdir} -rf && mkdir {resultdir}')
+        # analys_vaxe('/data/sse/20231111/trade.csv',  base_second=pd.Timestamp('20231111' + ' 09:30:00'))
+        futures = [executor.submit(analys_vaxe, arg, base_second=base_second, idx=idx, resultdir=resultdir) for idx, arg in enumerate(files)]
+        r, _ = wait(futures, return_when=ALL_COMPLETED)
+        r = [x for x in [x.result() for x in r] if x]
+        r = list(zip(*r))
+        max_date, min_date = max(r[0]), min(r[1])
+    os.system(f'rm -rf {resultdir}/*.lock')
+    logger.info(f'finish {time.time() - start}, max_date: {max_date}, min_date: {min_date}')
 
 
 if __name__ == '__main__':
@@ -220,32 +250,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
     rootdir = args.rootdir
     opr_type = args.type
+    opr_type = 'statistic'
     if opr_type == 'decompress':
         logger.info(decompress_dir(rootdir, 0, 500, 'trade.csv.tar.bz2', 'trade.csv'))
         exit(0)
     elif opr_type == 'statistic':
-        files = find_files(rootdir, 'trade.csv')
         start_date, end_date = args.start, args.end
-        # start_date = '20230101'
-        # end_date = '20230104'
-        print(start_date, end_date)
-        if start_date:
-            files = list(filter(lambda x: os.path.basename(os.path.dirname(x)) >= start_date, files))
-        if end_date:
-            files = list(filter(lambda x: os.path.basename(os.path.dirname(x)) <= end_date, files))
-        files = sorted(files)
-        base_second = pd.Timestamp(min(map(lambda x: os.path.basename(os.path.dirname(x)), files)) + ' 09:30:00')
-        # a = calc_minute(base_second + Timedelta(seconds=1), base_second)
-        # a = calc_minute(base_second + Timedelta(hours=4), base_second)
-        # files = list(set(files) - set(not_need))
-        logger.info(f'files: {files}, count: {len(files)}')
-        with ProcessPoolExecutor(max_workers=12) as executor:
-            resultdir = args.resultdir
-            os.system(f'rm {resultdir} -rf && mkdir {resultdir}')
-            # analys_vaxe('/data/sse/20231111/trade.csv',  base_second=pd.Timestamp('20231111' + ' 09:30:00'))
-            futures = [executor.submit(analys_vaxe, arg, base_second=base_second, idx=idx) for idx, arg in enumerate(files)]
-            r, _ = wait(futures, return_when=ALL_COMPLETED)
-            r = [x for x in [x.result() for x in r] if x]
-            r = list(zip(*r))
-            max_date, min_date = max(r[0]), min(r[1])
-        logger.info(f'finish {time.time() - start}, max_date: {max_date}, min_date: {min_date}')
+        # start_date = '20240101'
+        # end_date = '20240102'
+        statistic_trade(start_date, end_date, args.resultdir, rootdir)

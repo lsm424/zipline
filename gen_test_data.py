@@ -10,7 +10,7 @@ import numpy as np
 from tzlocal import get_localzone
 
 
-def gen_stock(stock, date):
+def gen_stock_date(stock, date):
     rng = np.random.default_rng()
     # 定义交易时间段
     trading_hours_morning_df = pd.DataFrame(pd.date_range(f'{date} 09:31', f'{date} 11:30', freq='T', tz=get_localzone()))
@@ -39,23 +39,25 @@ def gen_stock(stock, date):
     return df
 
 
-def gen_data(stock, recent_60_days):
+def gen_data_a_stock(stock, recent_days):
     # df = ak.stock_zh_a_minute(symbol=stock, period="1", adjust="qfq", start_date=recent_60_days[0], end_date=recent_60_days[-1])
-    data = list(map(lambda x: gen_stock(stock, x), recent_60_days))
+    data = list(map(lambda x: gen_stock_date(stock, x), recent_days))
     data = pd.concat(data)
     data.to_csv(f'./minute/{stock}.csv')
     print(f'{stock} done')
 
 
-if __name__ == '__main__':
-    # 生成最近60天的日期
+def gen_stock(days=60):
     trade_days = ak.tool_trade_date_hist_sina()['trade_date'].to_list()
     now = '2025-01-01'
-    recent_60_days = map(lambda x: x.strftime('%Y-%m-%d'), trade_days)
-    recent_60_days = sorted(filter(lambda x: x < now, recent_60_days), reverse=True)[:1 * 30]
+    recent_days = map(lambda x: x.strftime('%Y-%m-%d'), trade_days)
+    recent_days = sorted(filter(lambda x: x < now, recent_days), reverse=True)[:days]
     stocks = ak.stock_info_a_code_name()['code'].to_list()
     os.system('rm -rf minute; mkdir -p minute')
     cnt = multiprocessing.cpu_count() * 2
     with ProcessPoolExecutor(max_workers=cnt, mp_context=get_context('fork')) as executor:
-        futures = [executor.submit(gen_data, arg, recent_60_days) for arg in stocks]
+        futures = [executor.submit(gen_data_a_stock, arg, recent_days) for arg in stocks]
         results = [f.result() for f in futures]
+
+if __name__ == '__main__':
+    gen_stock()

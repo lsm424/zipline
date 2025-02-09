@@ -5,3 +5,4 @@ db/
 nohup.out
 *.pyc
 *.pickle
+stock_daliy_csv/

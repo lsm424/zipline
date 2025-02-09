@@ -390,7 +390,6 @@ class TradingAlgorithm:
         self.initialized = False
 
         self.initialize_kwargs = initialize_kwargs or {}
-
         self.benchmark_sid = benchmark_sid
 
         # A dictionary of capital changes, keyed by timestamp, indicating the
@@ -1811,7 +1810,7 @@ class TradingAlgorithm:
     @api_method
     @disallowed_in_before_trading_start(OrderInBeforeTradingStart())
     def order_target_percent(
-        self, asset, target, limit_price=None, stop_price=None, style=None
+        self, asset, target, limit_price=None, stop_price=None, style=None, real_time=None
     ):
         """Place an order to adjust a position to a target percent of the
         current portfolio value. If the position doesn't already exist, this is
@@ -1873,6 +1872,7 @@ class TradingAlgorithm:
             limit_price=limit_price,
             stop_price=stop_price,
             style=style,
+            real_time=real_time,
         )
 
     def _calculate_order_target_percent_amount(self, asset, target):

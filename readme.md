@@ -10,4 +10,41 @@
   3. *fields*：OHLCV可配置，支持ingest以及回测时可以新增字段，不配置的话默认为原来的'open,high,low,close,volume'，配置格式为英文逗号分隔字段;
   4. *lru_size*：bcolz的缓存大小，默认为3000，如果股票数大于3000，会导致每次回测都要读盘，严重拉低性能。
   
-  
+## 使用方法
+1. 安装依赖包：pip install -r requirements.txt
+2. - 您可以从trade.csv生成秒级数据，如下，从20240101到20240104（含）的数据进行统计：
+
+     ```python3 main.py --type statistic --start_date 20240101 --end_date 20240104```
+   - 您也可以生成伪造的数据，如下, 生成60天的测试数据：
+
+     ```python3 main.py --type gen_test --days 60```
+   
+   生成的csv数据默认在minute目录下
+3. 执行ingest：
+     ```python3 main.py --type ingest```
+4. 执行回测：
+     ```python3 main.py --type algo```
+
+更多具体的用法查看help
+
+```
+python3 main.py --help
+usage: main.py [-h] [--start START] [--end END] [--type {statistic,decompress,ingest,algo,gen_test}] [--days DAYS] [--rootdir ROOTDIR] [--csvdir CSVDIR] [--tempdir TEMPDIR] [--zipline_root ZIPLINE_ROOT] [--fields FIELDS] [--lru_size LRU_SIZE]
+
+基于zipline的回测框架。支持从trade.csv生成分钟级数据，并进行ingest和回测
+
+options:
+  -h, --help            show this help message and exit
+  --start START         从该起始日期统计trade.csv，仅在type为statistic有效，非必填
+  --end END             统计trade.csv的结束日期，仅在type为statistic有效，非必填
+  --type {statistic,decompress,ingest,algo,gen_test}
+                        操作类型：statistic为从trade.csv统计分钟级数据；decompress为解压出trade.csv；ingest为执行ingest操作；algo为运行回测；gen_test为生成测试数据。默认algo
+  --days DAYS           type为gen_test有效，生成多少天的数据，非必填
+  --rootdir ROOTDIR     数据根目录，默认/data/sse/
+  --csvdir CSVDIR       生成的分钟级数据目录，默认./minute
+  --tempdir TEMPDIR     zipline ingest过程中的临时目录，默认/data/zipline/tmp/
+  --zipline_root ZIPLINE_ROOT
+                        zipline数据的目录，默认/data/zipline
+  --fields FIELDS       zipline ingest过程中使用的字段，默认open,high,low,close,volume,real_time
+  --lru_size LRU_SIZE   zipline回测过程中使用的lru_size，默认6000
+```

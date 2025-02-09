@@ -456,7 +456,7 @@ class DataPortal:
                     asset,
                     "close",
                     dt,
-                    ffill=True,
+                    ffill=False,
                 )
             elif field == "contract":
                 return self._get_current_contract(asset, dt)
