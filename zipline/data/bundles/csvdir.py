@@ -320,7 +320,7 @@ def _pricing_iter(csvdir, symbols, metadata, divs_splits, show_progress):
             end_date = dfr.index[-1]
             ac_date = end_date + pd.Timedelta(days=1)
             metadata.iloc[sid] = start_date, end_date, ac_date, symbol
-            print(f"yield {idx}: sid {sid}")
+            print(f"yield {idx}, sid {sid}")
             yield sid, dfr
 
 

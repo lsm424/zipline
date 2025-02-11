@@ -95,6 +95,12 @@ def _run(
         environ,
         bundle_timestamp,
     )
+    if start is None or end is None:
+        syms = list(filter(lambda x: x, bundle_data.asset_finder.retrieve_all(bundle_data.asset_finder.sids, True)))
+        if start is None:
+            start = pd.Timestamp(min(map(lambda x: x.start_date, syms)).strftime('%Y%m%d'))
+        if end is None:
+            end = pd.Timestamp(max(map(lambda x: x.end_date, syms)).strftime('%Y%m%d'))
 
     if trading_calendar is None:
         trading_calendar = get_calendar("XNYS")
@@ -198,6 +204,7 @@ def _run(
 
     try:
         perf = TradingAlgorithm(
+            syms=syms,
             namespace=namespace,
             data_portal=data,
             get_pipeline_loader=choose_loader,
@@ -302,10 +309,10 @@ def load_extensions(default, extensions, strict, environ, reload=False):
 
 
 def run_algorithm(
-    start,
-    end,
     initialize,
     capital_base,
+    start=None,
+    end=None,
     handle_data=None,
     before_trading_start=None,
     analyze=None,

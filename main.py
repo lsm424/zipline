@@ -2,10 +2,13 @@ import argparse
 import os
 from exchange_calendars import get_calendar
 import pandas as pd
-from statistic_trade_csv import decompress_dir, statistic_trade, calendar  # NOQA: E402
 from gen_test_data import gen_stock
 import time
 import loguru
+from exchange_calendars import get_calendar
+from statistic_trade_csv import decompress_dir, statistic_trade, calendar  # NOQA: E402
+
+from model import get_data_by_strategy
 
 loguru.logger.add("./zipline.log", colorize=False, level="INFO", encoding="utf-8", retention="5 days", rotation="1 day", enqueue=True)
 logger = loguru.logger
@@ -61,21 +64,21 @@ if __name__ == '__main__':
         os.environ['lru_size'] = args.lru_size  # NOQA: E402
         os.environ['ZIPLINE_ROOT'] = args.zipline_root  # NOQA: E402
         from zipline import run_algorithm
-        from algo import initialize, handle_data, records
-        start = args.start if args.start else records.start_date.min().strftime('%Y%m%d')
-        end = args.end if args.end else records.end_date.max().strftime('%Y%m%d')
-        logger.info(f'执行回测，起始日期：{start}, 结束日期：{end}, fields: {args.fields}, lru size: {args.lru_size}')
-        run_algorithm(
-            start=pd.Timestamp(start),
-            end=pd.Timestamp(end),
+        from algo import initialize, handle_data
+        logger.info(f'执行回测，fields: {args.fields}, lru size: {args.lru_size}')
+        perf = run_algorithm(
+            start=pd.Timestamp(args.start) if args.start else None,
+            end=pd.Timestamp(args.end) if args.end else None,
             trading_calendar=calendar,
             initialize=initialize,
             handle_data=handle_data,
             data_frequency='minute',
             bundle='csvdir',
-            capital_base=10e6,
             output='dma.pickle',
+            capital_base=10000000,
         )
+        models = get_data_by_strategy()
+        logger.info(f'回测结束，perf: {perf}, models:\n{models}')
     logger.info(f"type: {run_type}，耗时：{time.time() - start_time}s")
 
 

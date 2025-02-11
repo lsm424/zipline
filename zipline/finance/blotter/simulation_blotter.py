@@ -63,7 +63,7 @@ class SimulationBlotter(Blotter):
         self.max_shares = int(1e11)
 
         self.slippage_models = {
-            Equity: equity_slippage or FixedBasisPointsSlippage(),
+            Equity: equity_slippage or FixedBasisPointsSlippage(basis_points=0),
             Future: future_slippage
             or VolatilityVolumeShare(
                 volume_limit=DEFAULT_FUTURE_VOLUME_SLIPPAGE_BAR_LIMIT,
@@ -141,7 +141,7 @@ class SimulationBlotter(Blotter):
             # Arbitrary limit of 100 billion (US) shares will never be
             # exceeded except by a buggy algorithm.
             raise OverflowError("Can't order more than %d shares" % self.max_shares)
-        dt = self.current_dt if not real_time else pd.Timestamp(real_time, unit='s')
+        dt = self.current_dt if not real_time else real_time
         is_buy = amount > 0
         order = Order(
             dt=dt,
@@ -155,7 +155,6 @@ class SimulationBlotter(Blotter):
         self.open_orders[order.asset].append(order)
         self.orders[order.id] = order
         self.new_orders.append(order)
-
         return order.id
 
     def cancel(self, order_id, relay_status=True):

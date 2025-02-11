@@ -665,7 +665,7 @@ class FixedBasisPointsSlippage(SlippageModel):
         max_volume = int(self.volume_limit * volume)
 
         price = data.current(order.asset, "close")
-        shares_to_fill = min(abs(order.open_amount), max_volume - self.volume_for_bar)
+        shares_to_fill = abs(order.open_amount)  # min(abs(order.open_amount), max_volume - self.volume_for_bar)
 
         if shares_to_fill == 0:
             raise LiquidityExceeded()

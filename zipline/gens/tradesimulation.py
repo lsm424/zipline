@@ -116,6 +116,8 @@ class AlgorithmSimulator:
             # called every tick (minute or day).
             algo.on_dt_changed(dt_to_use)
 
+            # 将handle_data提前，然后在统计mertics
+            handle_data(algo, current_data, dt_to_use)
             blotter = algo.blotter
 
             # handle any transactions and commissions coming out new orders
@@ -137,8 +139,6 @@ class AlgorithmSimulator:
 
             for commission in new_commissions:
                 metrics_tracker.process_commission(commission)
-
-            handle_data(algo, current_data, dt_to_use)
 
             # grab any new orders from the blotter, then clear the list.
             # this includes cancelled orders.

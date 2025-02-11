@@ -15,14 +15,19 @@
 from collections.abc import Iterable
 from collections import namedtuple
 from copy import copy
+import os
 import warnings
 from datetime import tzinfo, time, timezone
 import logging
+from loguru import logger
 import pytz
 import pandas as pd
 import numpy as np
-
+import akshare as ak
+from pandas import read_csv
 from itertools import chain, repeat
+from model import insert_db
+from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, FIRST_COMPLETED, wait
 
 from zipline.utils.calendar_utils import get_calendar, days_at_time
 
@@ -210,6 +215,7 @@ class TradingAlgorithm:
     def __init__(
         self,
         sim_params,
+        syms=None,
         data_portal=None,
         asset_finder=None,
         # Algorithm API
@@ -234,6 +240,22 @@ class TradingAlgorithm:
         create_event_context=None,
         **initialize_kwargs,
     ):
+        self.open_time = trading_calendar.open_times[0][1]
+        self.close_time = trading_calendar.close_times[0][1]
+        self.break_start_time = trading_calendar.break_start_times[0][1]
+        self.break_end_time = trading_calendar.break_end_times[0][1]
+        # 股票历史交易的天级数据
+        self.stock_daliy_dir = os.path.join(os.environ['ZIPLINE_ROOT'], 'stock_daliy_dir')
+        if not os.path.exists(self.stock_daliy_dir):
+            os.makedirs(self.stock_daliy_dir)
+        syms = list(filter(lambda x: x, data_portal.asset_finder.retrieve_all(data_portal.asset_finder.sids, True))) if not syms else syms
+        self.records_pd = pd.DataFrame(
+            {
+                'stock': list(map(lambda x: x.symbol, syms)),  # 股票代码
+                'syms': syms,
+            }
+        )
+
         # List of trading controls to be used to validate orders.
         self.trading_controls = []
 
@@ -401,6 +423,32 @@ class TradingAlgorithm:
 
         self.restrictions = NoRestrictions()
 
+    def _get_max_date_row(self, group, date):
+        # 对一个股，筛选出小于给定日期的所有行，并返回最大日期的行
+        filtered_group = group[group['date'] < date]
+        if not filtered_group.empty:
+            return filtered_group.loc[filtered_group['date'].idxmax()]
+        return None
+
+    # 对于所有股票，获取最近一个交易日的数据
+    def get_latest_trade_data(self, date):
+        return self.daliy_trade_data.groupby('stock').apply(lambda x: self._get_max_date_row(x, date)).dropna()[['date', 'close']].reset_index()
+
+    def init_daliy_trade_data(self):
+        # 拉取历史交易天级数据
+        logger.info(f'开始批量拉取{len(self.records_pd)}只股票的历史交易数据, 耗时较长，请耐心等待...')
+        executor = ThreadPoolExecutor(max_workers=50)
+        r = list(map(lambda x: executor.submit(self._get_stock_trade_date, x), self.records_pd['stock']))
+        wait(r, return_when=ALL_COMPLETED)
+        self.daliy_trade_data = pd.concat([x.result() for x in r])
+        self.daliy_trade_data['stock'] = self.daliy_trade_data['stock'].astype(int).astype(str)
+        self.daliy_trade_data['date'] = pd.to_datetime(self.daliy_trade_data['date'])
+        # 上面拉的股票数可能有限，进一步过滤有交易数据的股票
+        stocks = set(self.daliy_trade_data['stock']) & set(self.records_pd['stock'])
+        self.daliy_trade_data = self.daliy_trade_data[self.daliy_trade_data['stock'].isin(stocks)]  # [['stock', 'date', 'close']]
+        self.records_pd = self.records_pd[self.records_pd['stock'].isin(stocks)]
+        self.syms = self.records_pd['syms'].to_list()
+
     def init_engine(self, get_loader):
         """Construct and store a PipelineEngine from loader.
 
@@ -440,6 +488,9 @@ class TradingAlgorithm:
         self._in_before_trading_start = False
 
     def handle_data(self, data):
+        cur_time = data.current_dt.time()
+        if cur_time < self.open_time or cur_time > self.close_time or self.break_start_time < cur_time <= self.break_end_time:
+            return
         if self._handle_data:
             self._handle_data(self, data)
 
@@ -573,6 +624,7 @@ class TradingAlgorithm:
 
         if not self.initialized:
             self.initialize(**self.initialize_kwargs)
+            self.init_daliy_trade_data()
             self.initialized = True
 
         benchmark_source = self._create_benchmark_source()
@@ -1156,7 +1208,7 @@ class TradingAlgorithm:
         # yet found a good way to do that.
         normalized_date = self.trading_calendar.minute_to_session(self.datetime)
 
-        if normalized_date < asset.start_date:
+        if normalized_date.date() < asset.start_date.date():
             raise CannotOrderDelistedAsset(
                 msg="Cannot order {0}, as it started trading on"
                 " {1}.".format(asset.symbol, asset.start_date)
@@ -1260,7 +1312,32 @@ class TradingAlgorithm:
         amount, style = self._calculate_order(
             asset, amount, limit_price, stop_price, style
         )
+        self._record2db(asset, amount, real_time)
         return self.blotter.order(asset, amount, style, real_time=real_time)
+
+    # 记录到数据库
+    def _record2db(self, asset, amount, real_time):
+        if amount == 0:
+            return None
+        real_time = self.blotter.current_dt if not real_time else pd.Timestamp(real_time, unit='s')
+        asset_price = self.trading_client.current_data.current(asset, "price")
+
+        direction = 0 if amount > 0 else 1  # 0 买入 1 卖出
+        if direction == 0:
+            deal_weight = abs((amount * asset_price * asset.price_multiplier) / (self.portfolio.cash))
+        else:
+            whole_values, this_asset_value = 0, 0
+            for sym in self.portfolio.positions.values():
+                trade_daliy = self.daliy_trade_data[self.daliy_trade_data['stock'] == sym.asset.symbol]
+                trade_daliy = self._get_max_date_row(trade_daliy, pd.to_datetime(real_time.date().strftime("%Y-%m-%d")))
+                if trade_daliy is None:
+                    logger.error(f'{asset.symbol} {real_time} no _get_max_date_row')
+                    continue
+                whole_values += sym.amount * trade_daliy['close']
+                if sym.asset == asset:
+                    this_asset_value = sym.amount * trade_daliy['close']
+            deal_weight = this_asset_value / (self.portfolio.cash + whole_values)
+        insert_db(real_time, asset.symbol, direction, deal_weight, asset_price)
 
     def _calculate_order(
         self, asset, amount, limit_price=None, stop_price=None, style=None
@@ -1342,7 +1419,7 @@ class TradingAlgorithm:
 
     @api_method
     @disallowed_in_before_trading_start(OrderInBeforeTradingStart())
-    def order_value(self, asset, value, limit_price=None, stop_price=None, style=None):
+    def order_value(self, asset, value, limit_price=None, stop_price=None, style=None, real_time=None):
         """Place an order for a fixed amount of money.
 
         Equivalent to ``order(asset, value / data.current(asset, 'price'))``.
@@ -1387,7 +1464,30 @@ class TradingAlgorithm:
             limit_price=limit_price,
             stop_price=stop_price,
             style=style,
+            real_time=real_time,
         )
+
+    def _get_stock_trade_date(self, stock):
+        filename = os.path.join(self.stock_daliy_dir, stock + '.csv')
+        if os.path.exists(filename):
+            try:
+                df = read_csv(filename)
+                return df
+            except BaseException as e:
+                logger.error(f'读取{filename}失败，原因：{e}， 内容：{open(filename).read()}')
+
+        try:
+            full_name = stock
+            if not full_name.startswith('sh'):
+                full_name = 'sh' + full_name
+            df = ak.stock_zh_a_daily(full_name)
+            logger.info(f'拉取{stock}数据')
+            df['stock'] = stock
+        except BaseException as e:
+            logger.error(f'拉取{stock}数据失败，原因：{e}')
+            df = pd.DataFrame({})
+        df.to_csv(filename)
+        return df
 
     @property
     def recorded_vars(self):
@@ -1742,7 +1842,7 @@ class TradingAlgorithm:
     @api_method
     @disallowed_in_before_trading_start(OrderInBeforeTradingStart())
     def order_target_value(
-        self, asset, target, limit_price=None, stop_price=None, style=None
+        self, asset, target, limit_price=None, stop_price=None, style=None, real_time=None,
     ):
         """Place an order to adjust a position to a target value. If
         the position doesn't already exist, this is equivalent to placing a new
@@ -1805,6 +1905,7 @@ class TradingAlgorithm:
             limit_price=limit_price,
             stop_price=stop_price,
             style=style,
+            real_time=real_time
         )
 
     @api_method
