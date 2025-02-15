@@ -268,6 +268,8 @@ class TradingAlgorithm:
         self._platform = platform
         self.logger = None
 
+        self.history_records = pd.DataFrame()
+
         # XXX: This is kind of a mess.
         # We support passing a data_portal in `run`, but we need an asset
         # finder earlier than that to look up assets for things like
@@ -432,7 +434,7 @@ class TradingAlgorithm:
 
     # 对于所有股票，获取最近一个交易日的数据
     def get_latest_trade_data(self, date):
-        return self.daliy_trade_data.groupby('stock').apply(lambda x: self._get_max_date_row(x, date)).dropna()[['date', 'close']].reset_index()
+        return self.daliy_trade_data.groupby('stock').apply(lambda x: self._get_max_date_row(x, date))[['date', 'close']].reset_index().dropna()
 
     def init_daliy_trade_data(self):
         # 拉取历史交易天级数据
@@ -448,6 +450,7 @@ class TradingAlgorithm:
         self.daliy_trade_data = self.daliy_trade_data[self.daliy_trade_data['stock'].isin(stocks)]  # [['stock', 'date', 'close']]
         self.records_pd = self.records_pd[self.records_pd['stock'].isin(stocks)]
         self.syms = self.records_pd['syms'].to_list()
+        logger.info(f'实际测试股票数：{len(self.syms)}')
 
     def init_engine(self, get_loader):
         """Construct and store a PipelineEngine from loader.
@@ -462,6 +465,9 @@ class TradingAlgorithm:
             )
         else:
             self.engine = ExplodingPipelineEngine()
+
+    def save(self):
+        self.history_records.to_csv(f'./history_records.csv')
 
     def initialize(self, *args, **kwargs):
         """Call self._initialize with `self` made available to Zipline API

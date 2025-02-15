@@ -1,8 +1,10 @@
 *.log
 minute/
+minute_*
 db/
 .vscode/
 nohup.out
 *.pyc
 *.pickle
 stock_daliy_csv/
+*.csv

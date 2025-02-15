@@ -119,7 +119,6 @@ class AlgorithmSimulator:
             # 将handle_data提前，然后在统计mertics
             handle_data(algo, current_data, dt_to_use)
             blotter = algo.blotter
-
             # handle any transactions and commissions coming out new orders
             # placed in the last bar
             (

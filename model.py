@@ -33,7 +33,7 @@ class StrategyDeal(base):
     deal_price = Column(Float, nullable=False, default=0)
 
 
-engine = create_engine(f"mssql+pymssql://user:pass@db/StrategyDB?charset=utf8",
+engine = create_engine(f"mssql+pymssql://straWriter:straWriter@KAIKAIWIN/StrategyDB?charset=utf8",
                        connect_args={'tds_version': '7.0'}, echo=False)
 
 

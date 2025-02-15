@@ -25,7 +25,13 @@ if os.environ.get('ZIPLINE_ROOT') is None:
 
 #######################################################################
 # 回测算法，根据自己的需求修改下面的函数
+'''
+  框架内置对象说明：
+  context.records_pd: 内置于框架中的用于记录每只股票实时数据的pandas，默认包括字段“stock”（股票名称）、“sym”（股票对象）
+'''
 #######################################################################
+
+
 def initialize(context):
     context.data_portal
     # 初始化
@@ -80,6 +86,7 @@ def handle_data(context, data):
         context.records_pd = records_pd.drop('close', axis=1)
         # 当天每一只股票的购买金额上线
         context.max_cash_per_order = context.portfolio.cash * context.w
+        logger.info(f"new data, stage 4:  {records_pd[records_pd['stage'] == 4][['stock', 'first_time', 'count', 'volume_list']].to_string(index=True)}")
 
     # 按stock名称，统计交易量，价格合并到records
     prices = prices.reset_index()
@@ -126,7 +133,7 @@ def handle_data(context, data):
                                                                                                                              ((real_time.hour == 14) & (real_time.minute == 57) & (real_time.second == 0) & (records_pd['price'] < records_pd['limit_up_price'])))
     need_sell = need_sell1 | need_sell2
     if need_sell.any():  # 售出操作
-        logger.warning(f"[{context.i}]{data.current_dt}, real_time: {real_time}, 待卖出：{records_pd.loc[need_sell][['stock', 'first_time', 'count', 'volume_list', 'volume', 'price']]}")
+        logger.warning(f"[{context.i}]{data.current_dt}, real_time: {real_time}, 待卖出：{records_pd.loc[need_sell][['stock', 'first_time', 'count', 'volume_list', 'volume', 'price']].to_string(index=True)}")
         syms = records_pd.loc[need_sell, 'syms'].to_list()
         for sym in syms:
             order_target(sym, 0, real_time=real_time)  # 清仓
@@ -136,6 +143,7 @@ def handle_data(context, data):
     # 第二次涨停的数据
     second_limit_up = records_pd['stage'] == 3
     if second_limit_up.any():
+        logger.warning(f"real_time: {real_time}，二次涨停：{records_pd.loc[second_limit_up][['stock', 'first_time', 'count', 'volume_list', 'volume', 'price']].to_string(index=True)}")
         # 买入的条件：1.第一次涨停维持时间超过T秒，2.第一次涨停开始时间小于TM时刻，3.第二次涨停瞬间的tick的交易量位于当日集合竞价到第二次涨停瞬间所有tick量的前N位
         other_condition = (records_pd['count'] >= context.t) & (records_pd['first_time'].dt.time < context.tm) & \
             (records_pd.apply(lambda x: x['volume_list'] and x['volume_list'][0] <= x['volume'], axis=1))
@@ -144,7 +152,7 @@ def handle_data(context, data):
             # 依次按照固定金额买入
             cash = context.portfolio.cash
             syms = records_pd.loc[need_order, 'syms'].to_list()
-            logger.warning(f"待买入：{records_pd.loc[need_order][['stock', 'first_time', 'count', 'volume_list', 'volume', 'price']]}")
+            logger.warning(f"待买入：{records_pd.loc[need_order][['stock', 'first_time', 'count', 'volume_list', 'volume', 'price']].to_string(index=True)}")
             for sym in syms:
                 if cash < context.max_cash_per_order:
                     logger.warning(f"[{context.i}]{data.current_dt}, real_time: {real_time}, 剩余cash不足 {cash}")
@@ -159,6 +167,7 @@ def handle_data(context, data):
         # records_pd.loc[second_limit_up, 'volume_list'] = records_pd.loc[second_limit_up, 'volume_list'].apply(lambda x: [])  # 清空交易数据
 
     context.records_pd = records_pd.drop('price', axis=1).drop('volume', axis=1)
+    context.records_pd['real_time'] = real_time
     logger.info(f"[{context.i}]{data.current_dt}, real_time: {real_time}, 耗时：{round(time() - start, 3)}s, 耗时1：{round(time_stampe1 - start, 3)}  耗时2：{round(time_stampe2 - time_stampe1, 3)}s ，剩余cash:{context.portfolio.cash}")
 
 # def test():

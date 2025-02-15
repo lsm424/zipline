@@ -224,8 +224,8 @@ def statistic_trade(start_date, end_date, resultdir, rootdir):
     files = sorted(files)
     base_second = pd.Timestamp(min(map(lambda x: os.path.basename(os.path.dirname(x)), files)) + ' 09:30:00')
     # a = calc_minute(base_second + Timedelta(seconds=1), base_second)
-    a = calc_minute(pd.Timestamp(datetime.datetime.fromtimestamp(1704159178).strftime("%Y-%m-%d %H:%M:%S")), base_second)
-    a = calc_minute(pd.Timestamp(datetime.datetime.fromtimestamp(1704159181).strftime("%Y-%m-%d %H:%M:%S")), base_second)
+    # a = calc_minute(pd.Timestamp(datetime.datetime.fromtimestamp(1704159178).strftime("%Y-%m-%d %H:%M:%S")), base_second)
+    # a = calc_minute(pd.Timestamp(datetime.datetime.fromtimestamp(1704159181).strftime("%Y-%m-%d %H:%M:%S")), base_second)
     logger.info(f'files: {files}, count: {len(files)}, base_second: {base_second}')
     with ProcessPoolExecutor(max_workers=12) as executor:
         os.system(f'rm {resultdir} -rf && mkdir {resultdir}')
@@ -237,6 +237,7 @@ def statistic_trade(start_date, end_date, resultdir, rootdir):
         max_date, min_date = max(r[0]), min(r[1])
     os.system(f'rm -rf {resultdir}/*.lock')
     logger.info(f'finish {time.time() - start}, max_date: {max_date}, min_date: {min_date}')
+    os.system(f'cp {resultdir} {resultdir}_{start_date}_{end_date} -rf')
 
 
 if __name__ == '__main__':
@@ -256,6 +257,6 @@ if __name__ == '__main__':
         exit(0)
     elif opr_type == 'statistic':
         start_date, end_date = args.start, args.end
-        # start_date = '20240101'
-        # end_date = '20240102'
+        # start_date = '20230102'
+        # end_date = '20230104'
         statistic_trade(start_date, end_date, args.resultdir, rootdir)
