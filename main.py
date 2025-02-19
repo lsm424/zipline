@@ -65,6 +65,7 @@ if __name__ == '__main__':
         os.environ['ZIPLINE_ROOT'] = args.zipline_root  # NOQA: E402
         from zipline import run_algorithm
         from algo import initialize, handle_data
+        # args.start = '1997-06-12'
         logger.info(f'执行回测，fields: {args.fields}, lru size: {args.lru_size}')
         perf = run_algorithm(
             start=pd.Timestamp(args.start) if args.start else None,

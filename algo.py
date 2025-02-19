@@ -18,6 +18,7 @@ from pandas import notna
 import os
 from datetime import datetime, timedelta
 from numba import jit
+from decimal import Decimal, ROUND_HALF_UP
 
 if os.environ.get('ZIPLINE_ROOT') is None:
     os.environ['ZIPLINE_ROOT'] = '/data/zipline'
@@ -27,7 +28,8 @@ if os.environ.get('ZIPLINE_ROOT') is None:
 # 回测算法，根据自己的需求修改下面的函数
 '''
   框架内置对象说明：
-  context.records_pd: 内置于框架中的用于记录每只股票实时数据的pandas，默认包括字段“stock”（股票名称）、“sym”（股票对象）
+  context.records_pd: 记录每只股票实时数据的pandas.dataframe，默认列包括字段“stock”（股票代码）、“sym”（股票对象）
+  context.syms: 所有股票对象list
 '''
 #######################################################################
 
@@ -48,9 +50,9 @@ def initialize(context):
     context.default_date = datetime(year=1970, month=1, day=1, hour=0, minute=0, second=0)
     context.records_pd['count'] = 0  # 统计第一次涨停的时长
     context.records_pd['first_time'] = [context.default_date] * len(context.records_pd)   # 统计第一次涨停时间
-    context.records_pd['volume_list'] = [[]] * len(context.records_pd)  # 标记生命周期是否结果
-    context.records_pd['stage'] = 0  # 标记阶段：0 等待涨停；1 第一次涨停中； 2 第一次涨停结束；3 第二次涨停；4 已买入；5 已卖出/已结束
-    context.records_pd['value'] = 0  # 记录昨天收盘价下的总价值
+    context.records_pd['volume_list'] = [[]] * len(context.records_pd)  # 交易量前5的排序列表，从小到大排序
+    context.records_pd['stage'] = 0  # 标记阶段：0 等待第一次涨停；1 第一次涨停中； 2 第一次涨停结束；3 第二次涨停；4 已买入；5 已卖出/已结束
+    context.last_time = datetime(year=1970, month=1, day=1, hour=14, minute=57, second=0).time()
     logger.info(f'开始回测{len(context.records_pd)}只股票，初始金额{context.portfolio.cash}，日期：{context.sim_params.start_session} - {context.sim_params.end_session}')
 
 
@@ -77,8 +79,11 @@ def handle_data(context, data):
         last_day_trades = context.get_latest_trade_data(date)
         # 得到今天的涨停价、跌停价阈值
         records_pd = context.records_pd.merge(last_day_trades[['stock', 'close']], how='left', on='stock')
-        records_pd['limit_up_price'] = records_pd['close'] * 1.1  # 涨停价
-        records_pd['limit_down_price'] = records_pd['close'] * 0.9  # 跌停价
+
+        def round_decimal(value, decimals=2):  # 四舍五入
+            return float(Decimal(str(value)).quantize(Decimal('1e-{0}'.format(decimals)), rounding=ROUND_HALF_UP))
+        records_pd['limit_up_price'] = (records_pd['close'] * 1.1).apply(round_decimal)  # 涨停价
+        records_pd['limit_down_price'] = (records_pd['close'] * 0.9).apply(round_decimal)  # 跌停价
         records_pd.loc[records_pd['stage'] != 4, 'count'] = 0
         records_pd.loc[records_pd['stage'] != 4, 'first_time'] = context.default_date
         records_pd.loc[records_pd['stage'] != 4, 'stage'] = 0
@@ -125,9 +130,10 @@ def handle_data(context, data):
     records_pd.loc[mask_lt & (records_pd['stage'] == 1), 'stage'] += 1
 
     # 若为第二天，若盘中任意时间跌停，则按跌停价卖出，或10点整或14:57分不涨停，则按最新价卖出
+    cur_time = real_time.time()
     need_sell1 = (records_pd['stage'] == 4) & (records_pd['first_time'].dt.date == (real_time - timedelta(days=1)).date()) & ((records_pd['price'] <= records_pd['limit_down_price']) |
-                                                                                                                              ((real_time.hour == 10) & (real_time.minute == 0) & (real_time.second == 0) & (records_pd['price'] < records_pd['limit_up_price'])) |
-                                                                                                                              ((real_time.hour == 14) & (real_time.minute == 57) & (real_time.second == 0) & (records_pd['price'] < records_pd['limit_up_price'])))
+                                                                                                                              ((real_time.hour == 10) & ((real_time.minute >= 0) | (real_time.minute <= 1)) & (records_pd['price'] < records_pd['limit_up_price'])) |
+                                                                                                                              ((cur_time >= context.last_time) & (records_pd['price'] < records_pd['limit_up_price'])))
     # 若为第三天及以后，盘中任意时间跌停，则按跌停价卖出，或14:57分不涨停，则按最新价卖出
     need_sell2 = (records_pd['stage'] == 4) & (records_pd['first_time'].dt.date < (real_time - timedelta(days=1)).date()) & ((records_pd['price'] <= records_pd['limit_down_price']) |
                                                                                                                              ((real_time.hour == 14) & (real_time.minute == 57) & (real_time.second == 0) & (records_pd['price'] < records_pd['limit_up_price'])))
@@ -164,6 +170,7 @@ def handle_data(context, data):
                 records_pd.loc[records_pd['stock'] == sym.symbol, 'stage'] = 4
         # 不满足买入条件的结束生命周期
         records_pd.loc[(~other_condition) & second_limit_up, 'stage'] = 5
+        logger.info(f"二次不满足买入的数据: {records_pd.loc[(~other_condition) & second_limit_up][['stock', 'first_time', 'count', 'volume_list', 'volume', 'price']].to_string(index=True)}")
         # records_pd.loc[second_limit_up, 'volume_list'] = records_pd.loc[second_limit_up, 'volume_list'].apply(lambda x: [])  # 清空交易数据
 
     context.records_pd = records_pd.drop('price', axis=1).drop('volume', axis=1)

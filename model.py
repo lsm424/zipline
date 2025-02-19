@@ -103,7 +103,7 @@ with get_db_context_session() as session:
     print(data)
     session.query(StrategyDeal).filter(StrategyDeal.strategy_code == 'db_bt_hf1').delete()
     session.commit()
-    logger.info(f'删除数据成功')
+    logger.info(f'删除sqlserver db_bt_hf1数据成功')
 
 
 def get_data_by_strategy(strategy_code='db_bt_hf1'):
