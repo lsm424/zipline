@@ -213,6 +213,10 @@ def analys_vaxe(file, date=None, base_second=None, idx=0, resultdir='minute'):
         return None
 
 
+def save(x):
+    pd.read_csv(x).sort_values(by='real_time', ascending=True).set_index('time').to_csv(x)
+
+
 def statistic_trade(start_date, end_date, resultdir, rootdir):
     start = time.time()
     files = find_files(rootdir, 'trade.csv')
@@ -223,10 +227,14 @@ def statistic_trade(start_date, end_date, resultdir, rootdir):
         files = list(filter(lambda x: os.path.basename(os.path.dirname(x)) <= end_date, files))
     files = sorted(files)
     base_second = pd.Timestamp(min(map(lambda x: os.path.basename(os.path.dirname(x)), files)) + ' 09:30:00')
+    end_second = pd.Timestamp(max(map(lambda x: os.path.basename(os.path.dirname(x)), files)) + ' 15:00:00')
+    gen_date_map_file(base_second, end_second)
+
     # a = calc_minute(base_second + Timedelta(seconds=1), base_second)
     # a = calc_minute(pd.Timestamp(datetime.datetime.fromtimestamp(1704159178).strftime("%Y-%m-%d %H:%M:%S")), base_second)
     # a = calc_minute(pd.Timestamp(datetime.datetime.fromtimestamp(1704159181).strftime("%Y-%m-%d %H:%M:%S")), base_second)
     logger.info(f'files: {files}, count: {len(files)}, base_second: {base_second}')
+
     with ProcessPoolExecutor(max_workers=12) as executor:
         os.system(f'rm {resultdir} -rf && mkdir {resultdir}')
         # analys_vaxe('/data/sse/20231111/trade.csv',  base_second=pd.Timestamp('20231111' + ' 09:30:00'))
@@ -235,9 +243,30 @@ def statistic_trade(start_date, end_date, resultdir, rootdir):
         r = [x for x in [x.result() for x in r] if x]
         r = list(zip(*r))
         max_date, min_date = max(r[0]), min(r[1])
+
     os.system(f'rm -rf {resultdir}/*.lock')
-    logger.info(f'finish {time.time() - start}, max_date: {max_date}, min_date: {min_date}')
+    # 对bar second csv文件重新整理顺序
+    with ProcessPoolExecutor(max_workers=12) as executor:
+        all_files = list(map(lambda x: os.path.join(resultdir, x), filter(lambda x: x.endswith('.csv'), os.listdir(resultdir))))
+        futures = [executor.submit(save, x) for x in all_files]
+        wait(futures, return_when=ALL_COMPLETED)
+
+    logger.info(f'finish {time.time() - start}, max_date: {max_date}, min_date: {min_date}，生成日期映射文件date_map.csv')
     os.system(f'cp {resultdir} {resultdir}_{start_date}_{end_date} -rf')
+
+
+# 生成日期映射文件
+def gen_date_map_file(base_second, end_second):
+    import akshare as ak
+    trade_days = ak.tool_trade_date_hist_sina()['trade_date'].to_list()
+    date_map = pd.DataFrame({'真实时间': pd.to_datetime(np.arange(base_second.value + (10**9), end_second.value + (10**9), (10**9) * 1))})
+    date_map = date_map[date_map['真实时间'].dt.date.isin(trade_days) &
+                        (((date_map['真实时间'].dt.time > market_open_morning) & (date_map['真实时间'].dt.time <= market_close_morning)) |
+                        ((date_map['真实时间'].dt.time > market_open_afternoon) & (date_map['真实时间'].dt.time <= market_close_afternoon)))].reset_index(drop=True)
+    date_map['映射时间'] = date_map['真实时间'].apply(lambda x: calc_minute(x, base_second))
+    date_map['真实时间戳'] = pd.to_datetime(date_map['真实时间']).dt.tz_localize(get_localzone()).apply(lambda x: int(x.timestamp()))
+    date_map.set_index('真实时间戳', inplace=True)
+    date_map.to_csv('date_map.csv')
 
 
 if __name__ == '__main__':

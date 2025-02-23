@@ -12,14 +12,15 @@
   
 ## 使用方法
 1. 安装依赖包：pip install -r requirements.txt
-2. - 您可以从trade.csv生成秒级数据，如下，从20240101到20240104（含）的数据进行统计：
+2. - 您可以从trade.csv生成秒级数据（即second_bar数据），如下，从20240101到20240104（含）的数据进行统计：
 
      ```python3 main.py --type statistic --start_date 20240101 --end_date 20240104```
    - 您也可以生成伪造的数据，如下, 生成60天的测试数据：
 
      ```python3 main.py --type gen_test --days 60```
    
-   生成的csv数据默认在minute目录下
+   生成的second_bar csv数据默认在minute目录下，**同时生成date_map.csv文件记录真实时间到映射时间的关系表**
+   
 3. 执行ingest：
      ```python3 main.py --type ingest```
 4. 执行回测：

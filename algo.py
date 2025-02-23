@@ -59,7 +59,7 @@ def initialize(context):
 def handle_data(context, data):
     context.i += 1
     start = time()
-    # 当前帧股价
+    # 当前帧股价，data.current 返回dataframe，索引为股票对象sym， value列就是传入的price等其他ohlc， price==close
     prices = data.current(context.syms, 'price')
     prices = prices[prices.notnull()]
     if prices.empty:  # 当前帧所有股票数据为空
@@ -71,7 +71,7 @@ def handle_data(context, data):
 
     # 如果是新的一天，则更新records中的涨停价、跌停价，以及其他字段初始化
     cur_date = real_time.date()
-    if context.cur_date != cur_date:
+    if context.cur_date != cur_date:  # 新的一天
         context.cur_date = cur_date
         date = pd.to_datetime(cur_date.strftime("%Y-%m-%d"))
 
