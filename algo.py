@@ -89,8 +89,8 @@ def handle_data(context, data):
         records_pd.loc[records_pd['stage'] != 4, 'stage'] = 0
         records_pd.loc[records_pd['stage'] != 4, 'volume_list'] = records_pd.loc[records_pd['stage'] != 4, 'volume_list'].apply(lambda x: [])
         context.records_pd = records_pd.drop('close', axis=1)
-        # 当天每一只股票的购买金额上线
-        context.max_cash_per_order = context.portfolio.cash * context.w
+        # 当天每一只股票的购买金额上线, portfolio_value = cash(现金) + 持股数量 * 股票交易价格
+        context.max_cash_per_order = context.portfolio.portfolio_value * context.w
         logger.info(f"new data, stage 4:  {records_pd[records_pd['stage'] == 4][['stock', 'first_time', 'count', 'volume_list']].to_string(index=True)}")
 
     # 按stock名称，统计交易量，价格合并到records

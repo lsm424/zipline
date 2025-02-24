@@ -70,7 +70,7 @@ class SimulationBlotter(Blotter):
             ),
         }
         self.commission_models = {
-            Equity: equity_commission or PerShare(),
+            Equity: equity_commission or PerShare(cost=0),
             Future: future_commission
             or PerContract(
                 cost=DEFAULT_PER_CONTRACT_COST,

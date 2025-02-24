@@ -19,8 +19,9 @@ parser.add_argument('--end', type=str, default=None, help='统计trade.csv的结
 parser.add_argument('--type', type=str, default='algo', help='操作类型：statistic为从trade.csv统计分钟级数据；decompress为解压出trade.csv；ingest为执行ingest操作；algo为运行回测；gen_test为生成测试数据。默认algo',
                     choices=['statistic', 'decompress', 'ingest', 'algo', 'gen_test'])
 parser.add_argument('--days', type=int, default=60, help='type为gen_test有效，生成多少天的数据，非必填', required=False)
+parser.add_argument('--decompress_file', type=str, default='trade_data.csv.tar.bz2', help='解压的文件名，在type为decompress时生效', required=False)
 parser.add_argument('--rootdir', type=str, default='/data/sse/', help='数据根目录，默认/data/sse/', required=False)
-parser.add_argument('--csvdir', type=str, default='./minute', help='生成的分钟级数据目录，默认./minute', required=False)
+parser.add_argument('--csvdir', type=str, default='./minute', help='生成的秒级数据目录，默认./minute', required=False)
 parser.add_argument('--tempdir', type=str, default='/data/zipline/tmp/', help='zipline ingest过程中的临时目录，默认/data/zipline/tmp/', required=False)
 parser.add_argument('--zipline_root', type=str, default='/data/zipline', help='zipline数据的目录，默认/data/zipline', required=False)
 parser.add_argument('--fields', type=str, default='open,high,low,close,volume,real_time', help='zipline ingest过程中使用的字段，默认open,high,low,close,volume,real_time', required=False)
@@ -35,8 +36,8 @@ if __name__ == '__main__':
         start_date, end_date = args.start, args.end
         statistic_trade(start_date, end_date, args.csvdir, args.rootdir)
     elif run_type == 'decompress':
-        logger.info(f'开始解压trade.csv，保存到{args.csvdir}')
-        logger.info(decompress_dir(args.csvdir, 0, 0, 'trade.csv.tar.bz2', 'trade.csv'))
+        logger.info(f'开始解压trade.csv，保存到{args.rootdir}')
+        logger.info(decompress_dir(args.rootdir, 0, 0, args.decompress_file, 'trade.csv'))
     elif run_type == 'gen_test':
         logger.info(f'准备生成测试数据，共{args.days}天')
         gen_stock(args.days)

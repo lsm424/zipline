@@ -95,8 +95,8 @@ def _run(
         environ,
         bundle_timestamp,
     )
+    syms = list(filter(lambda x: x, bundle_data.asset_finder.retrieve_all(bundle_data.asset_finder.sids, True)))
     if start is None or end is None:
-        syms = list(filter(lambda x: x, bundle_data.asset_finder.retrieve_all(bundle_data.asset_finder.sids, True)))
         if start is None:
             start = pd.Timestamp(min(map(lambda x: x.start_date, syms)).strftime('%Y%m%d'))
         if end is None:
