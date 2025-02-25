@@ -246,7 +246,7 @@ def statistic_trade(start_date, end_date, resultdir, rootdir):
 
     os.system(f'rm -rf {resultdir}/*.lock')
     # 对bar second csv文件重新整理顺序
-    with ProcessPoolExecutor(max_workers=12) as executor:
+    with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
         all_files = list(map(lambda x: os.path.join(resultdir, x), filter(lambda x: x.endswith('.csv'), os.listdir(resultdir))))
         futures = [executor.submit(save, x) for x in all_files]
         wait(futures, return_when=ALL_COMPLETED)

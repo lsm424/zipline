@@ -2,7 +2,9 @@ import click
 import os
 import sys
 import warnings
-
+import time
+from loguru import logger
+from multiprocessing import Process
 try:
     from pygments import highlight
     from pygments.lexers import PythonLexer
@@ -84,6 +86,7 @@ def _run(
     blotter,
     custom_loader,
     benchmark_spec,
+    parrelle_by_day,
 ):
     """Run a backtest for the given algorithm.
 
@@ -95,13 +98,45 @@ def _run(
         environ,
         bundle_timestamp,
     )
-    syms = list(filter(lambda x: x, bundle_data.asset_finder.retrieve_all(bundle_data.asset_finder.sids, True)))
+
     if start is None or end is None:
+        syms = list(filter(lambda x: x, bundle_data.asset_finder.retrieve_all(bundle_data.asset_finder.sids, True)))
         if start is None:
             start = pd.Timestamp(min(map(lambda x: x.start_date, syms)).strftime('%Y%m%d'))
         if end is None:
             end = pd.Timestamp(max(map(lambda x: x.end_date, syms)).strftime('%Y%m%d'))
 
+    # with ProcessPoolExecutor(max_workers=12) as executor:
+    _run_algo(start, end, benchmark_spec, bundle_data, local_namespace, defines, algofile, print_algo, output, algotext, metrics_set,
+              capital_base, data_frequency, initialize, handle_data, before_trading_start, analyze, custom_loader, trading_calendar,
+              blotter)
+    # futures = [executor.submit(_run_algo, start, end, benchmark_spec, bundle_data, local_namespace, defines, algofile, print_algo, output, algotext, metrics_set,
+    #                            capital_base, data_frequency, initialize, handle_data, before_trading_start, analyze, custom_loader, trading_calendar,
+    #                            blotter)]
+    # wait(futures, return_when=ALL_COMPLETED)
+
+
+def _run_algo(start: pd.Timestamp,
+              end: pd.Timestamp,
+              benchmark_spec,
+              bundle_data,
+              local_namespace,
+              defines,
+              algofile,
+              print_algo,
+              output,
+              algotext,
+              metrics_set,
+              capital_base,
+              data_frequency,
+              initialize,
+              handle_data,
+              before_trading_start,
+              analyze,
+              custom_loader,
+              trading_calendar,
+              blotter):
+    syms = list(filter(lambda x: x, bundle_data.asset_finder.retrieve_all(bundle_data.asset_finder.sids, True)))
     if trading_calendar is None:
         trading_calendar = get_calendar("XNYS")
 
@@ -329,6 +364,7 @@ def run_algorithm(
     custom_loader=None,
     blotter="default",
     output=os.devnull,
+    parrelle_by_day=False,
 ):
     """
     Run a trading algorithm.
@@ -390,7 +426,8 @@ def run_algorithm(
         ``zipline.extensions.register`` and call it with no parameters.
         Default is a :class:`zipline.finance.blotter.SimulationBlotter` that
         never cancels orders.
-
+    parrelle_by_day: bool, optional
+        If True, run the algorithm in parallel by day.
     Returns
     -------
     perf : pd.DataFrame
@@ -403,6 +440,21 @@ def run_algorithm(
     load_extensions(default_extension, extensions, strict_extensions, environ)
 
     benchmark_spec = BenchmarkSpec.from_returns(benchmark_returns)
+
+    if start is None or end is None:
+        bundle_data = bundles.load(
+            bundle,
+            environ,
+            bundle_timestamp,
+        )
+        syms = list(filter(lambda x: x, bundle_data.asset_finder.retrieve_all(bundle_data.asset_finder.sids, True)))
+        if start is None:
+            start = pd.Timestamp(min(map(lambda x: x.start_date, syms)).strftime('%Y%m%d'))
+        if end is None:
+            end = pd.Timestamp(max(map(lambda x: x.end_date, syms)).strftime('%Y%m%d'))
+    if parrelle_by_day:
+        return _parrelle_run(start, end, benchmark_spec, bundle_data, output, metrics_set, capital_base, data_frequency,
+                             initialize, handle_data, before_trading_start, analyze, custom_loader, trading_calendar, blotter)
 
     return _run(
         handle_data=handle_data,
@@ -427,7 +479,98 @@ def run_algorithm(
         blotter=blotter,
         custom_loader=custom_loader,
         benchmark_spec=benchmark_spec,
+        parrelle_by_day=parrelle_by_day
     )
+
+
+def process_pool(tasks, max_processes):
+    """实现一个简单的进程池"""
+    processes = []
+    task_index = 0  # 当前任务索引
+
+    while task_index < len(tasks) or processes:
+        # 启动新的进程直到达到最大进程数
+        if len(processes) < max_processes and task_index < len(tasks):
+            task = tasks[task_index]
+            p = Process(target=task[0], args=task[1])
+            processes.append(p)
+            p.start()
+            task_index += 1
+
+        # 等待已经启动的进程完成
+        for p in processes[:]:
+            if not p.is_alive():
+                p.join()  # 等待该进程结束
+                processes.remove(p)  # 移除已完成的进程
+        time.sleep(0.5)
+
+
+def _parrelle_run(start: pd.Timestamp, end: pd.Timestamp, benchmark_spec, bundle_data, output, metrics_set, capital_base, data_frequency,
+                  initialize, handle_data, before_trading_start, analyze, custom_loader, trading_calendar, blotter):
+    # 读取映射时间，根据映射时间start、end获取对应的真实时间范围
+    date_map = pd.read_csv('date_map.csv', parse_dates=['真实时间', '映射时间'])
+    start_date = date_map[date_map['映射时间'] >= start]
+    start_date = start_date.loc[start_date['真实时间'].idxmin()]['真实时间']
+    end_date = date_map[date_map['映射时间'] >= end]
+    end_date = end_date.loc[end_date['真实时间'].idxmin()]['真实时间']
+    date_range = pd.date_range(start=start_date, end=end_date, freq='D').tolist()
+
+    tasks = []
+    for date in date_range:
+        # 对每一个真实时间日期，获取映射时间的start 和 end作为入参
+        date = date_map.loc[date_map['真实时间'].dt.date == date.date()]
+        if date.empty:
+            continue
+        start, end = date['映射时间'].min().floor('D'), date['映射时间'].max().floor('D')
+        logger.info(f'{date.iloc[0]["真实时间"]} {start} {end}')
+        tasks.append((_run_algo, (start,
+                                  end,
+                                  benchmark_spec,
+                                  bundle_data,
+                                  False,
+                                  (),
+                                  None,
+                                  False,
+                                  output,
+                                  None,
+                                  metrics_set,
+                                  capital_base,
+                                  data_frequency,
+                                  initialize,
+                                  handle_data,
+                                  before_trading_start,
+                                  analyze,
+                                  custom_loader,
+                                  trading_calendar,
+                                  blotter)))
+    logger.info(f'并行任务数：{len(tasks)}')
+    process_pool(tasks, os.cpu_count())
+    # p = Process(target=_run_algo, args=(start,
+    #                                     end,
+    #                                     benchmark_spec,
+    #                                     bundle_data,
+    #                                     False,
+    #                                     (),
+    #                                     None,
+    #                                     False,
+    #                                     output,
+    #                                     None,
+    #                                     metrics_set,
+    #                                     capital_base,
+    #                                     data_frequency,
+    #                                     initialize,
+    #                                     handle_data,
+    #                                     before_trading_start,
+    #                                     analyze,
+    #                                     custom_loader,
+    #                                     trading_calendar,
+    #                                     blotter))
+
+    # p.start()
+    # proc_list.append(p)
+
+    # for p in proc_list:
+    #     p.join()
 
 
 class BenchmarkSpec:

@@ -175,7 +175,7 @@ def handle_data(context, data):
 
     context.records_pd = records_pd.drop('price', axis=1).drop('volume', axis=1)
     context.records_pd['real_time'] = real_time
-    logger.info(f"[{context.i}]{data.current_dt}, real_time: {real_time}, 耗时：{round(time() - start, 3)}s, 耗时1：{round(time_stampe1 - start, 3)}  耗时2：{round(time_stampe2 - time_stampe1, 3)}s ，剩余cash:{context.portfolio.cash}")
+    logger.info(f"[{os.getpid()}][{context.i}]{data.current_dt}, real_time: {real_time}, 耗时：{round(time() - start, 3)}s, 耗时1：{round(time_stampe1 - start, 3)}  耗时2：{round(time_stampe2 - time_stampe1, 3)}s ，剩余cash:{context.portfolio.cash}")
 
 # def test():
 #     dt = pd.Timestamp('2024-10-09 09:31:00', tz=get_localzone())

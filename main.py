@@ -1,14 +1,11 @@
 import argparse
 import os
-from exchange_calendars import get_calendar
 import pandas as pd
 from gen_test_data import gen_stock
 import time
 import loguru
-from exchange_calendars import get_calendar
 from statistic_trade_csv import decompress_dir, statistic_trade, calendar  # NOQA: E402
 
-from model import get_data_by_strategy
 
 loguru.logger.add("./zipline.log", colorize=False, level="INFO", encoding="utf-8", retention="5 days", rotation="1 day", enqueue=True)
 logger = loguru.logger
@@ -18,6 +15,7 @@ parser.add_argument('--start', type=str, default=None, help='从该起始日期�
 parser.add_argument('--end', type=str, default=None, help='统计trade.csv的结束日期，仅在type为statistic有效，非必填', required=False)
 parser.add_argument('--type', type=str, default='algo', help='操作类型：statistic为从trade.csv统计分钟级数据；decompress为解压出trade.csv；ingest为执行ingest操作；algo为运行回测；gen_test为生成测试数据。默认algo',
                     choices=['statistic', 'decompress', 'ingest', 'algo', 'gen_test'])
+parser.add_argument('--parallel', action='store_true', help="启用按天并行回测")
 parser.add_argument('--days', type=int, default=60, help='type为gen_test有效，生成多少天的数据，非必填', required=False)
 parser.add_argument('--decompress_file', type=str, default='trade_data.csv.tar.bz2', help='解压的文件名，在type为decompress时生效', required=False)
 parser.add_argument('--rootdir', type=str, default='/data/sse/', help='数据根目录，默认/data/sse/', required=False)
@@ -66,7 +64,7 @@ if __name__ == '__main__':
         os.environ['ZIPLINE_ROOT'] = args.zipline_root  # NOQA: E402
         from zipline import run_algorithm
         from algo import initialize, handle_data
-        # args.start = '1997-06-12'
+        from model import get_data_by_strategy
         logger.info(f'执行回测，fields: {args.fields}, lru size: {args.lru_size}')
         perf = run_algorithm(
             start=pd.Timestamp(args.start) if args.start else None,
@@ -78,6 +76,7 @@ if __name__ == '__main__':
             bundle='csvdir',
             output='dma.pickle',
             capital_base=10000000,
+            parrelle_by_day=args.parallel,
         )
         models = get_data_by_strategy()
         logger.info(f'回测结束，perf: {perf}, models:\n{models}')
