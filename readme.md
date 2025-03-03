@@ -22,7 +22,8 @@
    - 您也可以生成伪造的数据，如下, 生成60天的测试数据：
 
      ``python3 main.py --type gen_test --days 60``
-
+   - 您如果只需要统计00和60开头的股票（这样会加速统计）：
+     ``python3 main.py --type statistic --filter_stock 00,60``
    生成的second_bar csv数据默认在minute目录下，**同时生成date_map.csv文件记录真实时间到映射时间的关系表，内容格式如下**
    ```
    真实时间戳,真实时间,映射时间
@@ -58,11 +59,16 @@ options:
                         操作类型：statistic为从trade.csv统计分钟级数据；decompress为解压出trade.csv；ingest为执行ingest操作；algo为运行回测；gen_test为生成测试数据。默认algo
   --parallel            启用按天并行回测
   --days DAYS           type为gen_test有效，生成多少天的数据，非必填
-  --rootdir ROOTDIR     数据根目录，默认/data/sse/
-  --csvdir CSVDIR       生成的分钟级数据目录，默认./minute
+  --decompress_file DECOMPRESS_FILE
+                        解压的文件名，在type为decompress时生效
+  --filter_stock FILTER_STOCK
+                        type为statistic时，指定过滤的股票代码开头,如需要只要00和60开头的股票，则配置“00,60”
+  --rootdir ROOTDIR     数据根目录，多个目录用“,”号分隔，默认/data/sse/
+  --csvdir CSVDIR       生成的秒级数据目录，默认./minute
   --tempdir TEMPDIR     zipline ingest过程中的临时目录，默认/data/zipline/tmp/
   --zipline_root ZIPLINE_ROOT
                         zipline数据的目录，默认/data/zipline
   --fields FIELDS       zipline ingest过程中使用的字段，默认open,high,low,close,volume,real_time
   --lru_size LRU_SIZE   zipline回测过程中使用的lru_size，默认6000
+
 ```

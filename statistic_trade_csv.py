@@ -42,10 +42,13 @@ all_timestamps = sorted(all_timestamps + pd.Timedelta(hours=8))
 
 def decompress_bz2(source_path, file='snap.csv'):
     snap = os.path.dirname(source_path) + f'/{file}'
-    if os.path.exists(snap):
-        return snap
+    # if os.path.exists(snap):
+    #     return snap
     destination_path = os.path.dirname(source_path)
     cmd = f'cd {destination_path} && tar xvf {source_path}'
+    if file == 'entrust_data.csv':  # 对于szse数据要进一步处理：8个字段一行的为trade数据，并且把倒数第二行的时间插入到第三列
+        cmd += " -O | awk -F, 'NF == 8' |awk -F, '{temp = $7; $7 = $6; $6 = $5; $5 = $4; $4 = temp; print $0 }' OFS=, > trade.csv"
+
     logger.info(cmd)
     if os.system(cmd):
         logger.info(f'error {source_path}')
@@ -151,15 +154,16 @@ config = {
 }
 
 
-def analys_vaxe(file, date=None, base_second=None, idx=0, resultdir='minute'):
+def analys_vaxe(file, date=None, base_second=None, idx=0, resultdir='minute', filter_stocks=[]):
     pandarallel.initialize(progress_bar=True)  # 启用进度条，并设置4个并行进程
 
     def _to_second(time_int):
         time_str = f"{time_int:08d}"
+        time_start_pos = 8 if len(time_str) >= 14 else 0
         # 提取小时、分钟、秒、毫秒
-        hours = int(time_str[:2])
-        minutes = int(time_str[2:4])
-        seconds = int(time_str[4:6])
+        hours = int(time_str[time_start_pos:2 + time_start_pos])
+        minutes = int(time_str[time_start_pos + 2: 4 + time_start_pos])
+        seconds = int(time_str[time_start_pos + 4: time_start_pos + 6])
         # milliseconds = int(time_str[6:])
         # 计算总秒数
         total_seconds = int(hours * 3600 + minutes * 60 + seconds) + 1
@@ -176,13 +180,19 @@ def analys_vaxe(file, date=None, base_second=None, idx=0, resultdir='minute'):
         date_second = int(datetime.datetime.strptime(date, "%Y%m%d").replace(tzinfo=get_localzone()).timestamp())  # 1970.1.1日到date这一天的秒数
         # 读取csv文件
         columns, names = [2, 3, 4, 5], ['stock', 'time', 'price', 'volume']
-        df = vaex.read_csv(file, usecols=columns, names=names, delimiter=',', header=None)
+        df = vaex.read_csv(file, usecols=columns, names=names, delimiter=',', header=None, dtype={'stock': str})
         # 过滤非交易时间的数据
         df['time_sec'] = df['time'].apply(_to_second)
-        df = df[
-            ((df['time_sec'] > market_open_morning_int) & (df['time_sec'] <= market_close_morning_int)) |
-            ((df['time_sec'] > market_open_afternoon_int) & (df['time_sec'] <= market_close_afternoon_int))
-        ]
+        filter_condition = (((df['time_sec'] > market_open_morning_int) & (df['time_sec'] <= market_close_morning_int)) |
+                            ((df['time_sec'] > market_open_afternoon_int) & (df['time_sec'] <= market_close_afternoon_int))) & \
+            (df['stock'].str.startswith('00') | df['stock'].str.startswith('60'))
+        # 过滤股票
+        filter_stock_condition = 1 == 1
+        for stock in filter_stocks:
+            filter_stock_condition |= df['stock'].str.startswith(stock)
+        filter_condition &= filter_stock_condition
+
+        df = df[filter_condition]
         logger.info(f'[{idx}]{file} filter time {df.shape} {time.time() - start}')
         # 统计hlocv
         df = df.sort(by=['stock', 'time_sec'], ascending=True)
@@ -217,35 +227,38 @@ def save(x):
     pd.read_csv(x).sort_values(by='real_time', ascending=True).set_index('time').to_csv(x)
 
 
-def statistic_trade(start_date, end_date, resultdir, rootdir):
+def statistic_trade(start_date, end_date, resultdir, rootdirs, filter_stock=[]):
+    logger.info(f'start: {start_date}, end: {end_date}, rootdirs: {rootdirs}')
     start = time.time()
-    files = find_files(rootdir, 'trade.csv')
+    files = reduce(lambda x, y: x + y, map(lambda x: find_files(x, 'trade.csv'), rootdirs))
     print(start_date, end_date)
     if start_date:
         files = list(filter(lambda x: os.path.basename(os.path.dirname(x)) >= start_date, files))
     if end_date:
         files = list(filter(lambda x: os.path.basename(os.path.dirname(x)) <= end_date, files))
-    files = sorted(files)
+    files = sorted(files, reverse=True)
+    start_date = min(map(lambda x: os.path.basename(os.path.dirname(x)), files))
+    end_date = max(map(lambda x: os.path.basename(os.path.dirname(x)), files))
     base_second = pd.Timestamp(min(map(lambda x: os.path.basename(os.path.dirname(x)), files)) + ' 09:30:00')
     end_second = pd.Timestamp(max(map(lambda x: os.path.basename(os.path.dirname(x)), files)) + ' 15:00:00')
-    gen_date_map_file(base_second, end_second)
+    date_map = gen_date_map_file(base_second, end_second)
 
-    # a = calc_minute(base_second + Timedelta(seconds=1), base_second)
-    # a = calc_minute(pd.Timestamp(datetime.datetime.fromtimestamp(1704159178).strftime("%Y-%m-%d %H:%M:%S")), base_second)
-    # a = calc_minute(pd.Timestamp(datetime.datetime.fromtimestamp(1704159181).strftime("%Y-%m-%d %H:%M:%S")), base_second)
-    logger.info(f'files: {files}, count: {len(files)}, base_second: {base_second}')
+    trade_days = set(date_map['真实时间'].dt.strftime("%Y%m%d"))
+    files = list(filter(lambda x: os.path.basename(os.path.dirname(x)) in trade_days, files))
+    base_second = pd.Timestamp(min(map(lambda x: os.path.basename(os.path.dirname(x)), files)) + ' 09:30:00')
+    end_second = pd.Timestamp(max(map(lambda x: os.path.basename(os.path.dirname(x)), files)) + ' 15:00:00')
 
+    logger.info(f'files: {files}, count: {len(files)}, base_second: {base_second}, filter_stock: {filter_stock}')
     with ProcessPoolExecutor(max_workers=12) as executor:
         os.system(f'rm {resultdir} -rf && mkdir {resultdir}')
-        # analys_vaxe('/data/sse/20231111/trade.csv',  base_second=pd.Timestamp('20231111' + ' 09:30:00'))
-        futures = [executor.submit(analys_vaxe, arg, base_second=base_second, idx=idx, resultdir=resultdir) for idx, arg in enumerate(files)]
+        futures = [executor.submit(analys_vaxe, arg, base_second=base_second, idx=idx, resultdir=resultdir, filter_stocks=filter_stock) for idx, arg in enumerate(files)]
         r, _ = wait(futures, return_when=ALL_COMPLETED)
         r = [x for x in [x.result() for x in r] if x]
         r = list(zip(*r))
         max_date, min_date = max(r[0]), min(r[1])
 
     os.system(f'rm -rf {resultdir}/*.lock')
-    # 对bar second csv文件重新整理顺序
+    logger.info(f'对bar second csv文件重新整理顺序')
     with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
         all_files = list(map(lambda x: os.path.join(resultdir, x), filter(lambda x: x.endswith('.csv'), os.listdir(resultdir))))
         futures = [executor.submit(save, x) for x in all_files]
@@ -258,15 +271,18 @@ def statistic_trade(start_date, end_date, resultdir, rootdir):
 # 生成日期映射文件
 def gen_date_map_file(base_second, end_second):
     import akshare as ak
+    start = time.time()
     trade_days = ak.tool_trade_date_hist_sina()['trade_date'].to_list()
     date_map = pd.DataFrame({'真实时间': pd.to_datetime(np.arange(base_second.value + (10**9), end_second.value + (10**9), (10**9) * 1))})
     date_map = date_map[date_map['真实时间'].dt.date.isin(trade_days) &
                         (((date_map['真实时间'].dt.time > market_open_morning) & (date_map['真实时间'].dt.time <= market_close_morning)) |
-                        ((date_map['真实时间'].dt.time > market_open_afternoon) & (date_map['真实时间'].dt.time <= market_close_afternoon)))].reset_index(drop=True)
+                         ((date_map['真实时间'].dt.time > market_open_afternoon) & (date_map['真实时间'].dt.time <= market_close_afternoon)))].reset_index(drop=True)
     date_map['映射时间'] = date_map['真实时间'].apply(lambda x: calc_minute(x, base_second))
     date_map['真实时间戳'] = pd.to_datetime(date_map['真实时间']).dt.tz_localize(get_localzone()).apply(lambda x: int(x.timestamp()))
     date_map.set_index('真实时间戳', inplace=True)
     date_map.to_csv('date_map.csv')
+    logger.info(f'gen data_map.csv, time use: {time.time() - start}')
+    return date_map
 
 
 if __name__ == '__main__':
@@ -278,7 +294,7 @@ if __name__ == '__main__':
     parser.add_argument('--rootdir', type=str, default='/data/sse/', help='数据根目录，默认/data/sse/', required=False)
     parser.add_argument('--resultdir', type=str, default='./minute', help='生成的分钟级数据目录，默认./minute', required=False)
     args = parser.parse_args()
-    rootdir = args.rootdir
+    rootdir = args.rootdir.split()
     opr_type = args.type
     opr_type = 'statistic'
     if opr_type == 'decompress':
@@ -286,6 +302,7 @@ if __name__ == '__main__':
         exit(0)
     elif opr_type == 'statistic':
         start_date, end_date = args.start, args.end
-        # start_date = '20230102'
-        # end_date = '20230104'
-        statistic_trade(start_date, end_date, args.resultdir, rootdir)
+        start_date = '20240404'
+        end_date = '20240411'
+        rootdir = '/data/szse/stock,/data/sse'
+        statistic_trade(start_date, end_date, args.resultdir, rootdir.split(','))

@@ -443,7 +443,7 @@ class TradingAlgorithm:
         r = list(map(lambda x: executor.submit(self._get_stock_trade_date, x), self.records_pd['stock']))
         wait(r, return_when=ALL_COMPLETED)
         self.daliy_trade_data = pd.concat([x.result() for x in r])
-        self.daliy_trade_data['stock'] = self.daliy_trade_data['stock'].astype(int).astype(str)
+        self.daliy_trade_data['stock'] = self.daliy_trade_data['stock'].astype(int).astype(str).apply(lambda x: x.zfill(6))
         self.daliy_trade_data['date'] = pd.to_datetime(self.daliy_trade_data['date'])
         # 上面拉的股票数可能有限，进一步过滤有交易数据的股票
         stocks = set(self.daliy_trade_data['stock']) & set(self.records_pd['stock'])
@@ -1484,13 +1484,16 @@ class TradingAlgorithm:
 
         try:
             full_name = stock
-            if not full_name.startswith('sh'):
-                full_name = 'sh' + full_name
+            sh_head = ("50", "51", "60", "90", "110", "113", "118",
+                       "132", "204", "5", "6", "9", "7")
+            bj_head = ('8', )
+            if full_name.isdigit():
+                full_name = ("sh" if stock.startswith(sh_head) else "bj" if full_name.startswith(bj_head) else "sz") + full_name
             df = ak.stock_zh_a_daily(full_name)
-            logger.info(f'拉取{stock}数据')
+            logger.info(f'拉取{full_name}数据')
             df['stock'] = stock
         except BaseException as e:
-            logger.error(f'拉取{stock}数据失败，原因：{e}')
+            logger.error(f'拉取{full_name}数据失败，原因：{e}')
             df = pd.DataFrame({})
         df.to_csv(filename)
         return df

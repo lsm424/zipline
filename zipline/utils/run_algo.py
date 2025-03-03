@@ -440,18 +440,18 @@ def run_algorithm(
     load_extensions(default_extension, extensions, strict_extensions, environ)
 
     benchmark_spec = BenchmarkSpec.from_returns(benchmark_returns)
-
+    bundle_data = bundles.load(
+        bundle,
+        environ,
+        bundle_timestamp,
+    )
     if start is None or end is None:
-        bundle_data = bundles.load(
-            bundle,
-            environ,
-            bundle_timestamp,
-        )
         syms = list(filter(lambda x: x, bundle_data.asset_finder.retrieve_all(bundle_data.asset_finder.sids, True)))
         if start is None:
             start = pd.Timestamp(min(map(lambda x: x.start_date, syms)).strftime('%Y%m%d'))
         if end is None:
             end = pd.Timestamp(max(map(lambda x: x.end_date, syms)).strftime('%Y%m%d'))
+
     if parrelle_by_day:
         return _parrelle_run(start, end, benchmark_spec, bundle_data, output, metrics_set, capital_base, data_frequency,
                              initialize, handle_data, before_trading_start, analyze, custom_loader, trading_calendar, blotter)
@@ -496,6 +496,7 @@ def process_pool(tasks, max_processes):
             processes.append(p)
             p.start()
             task_index += 1
+            logger.info(f"启动第{task_index}个进程 {p.pid}")
 
         # 等待已经启动的进程完成
         for p in processes[:]:
@@ -544,7 +545,7 @@ def _parrelle_run(start: pd.Timestamp, end: pd.Timestamp, benchmark_spec, bundle
                                   trading_calendar,
                                   blotter)))
     logger.info(f'并行任务数：{len(tasks)}')
-    process_pool(tasks, os.cpu_count())
+    process_pool(tasks, int(os.cpu_count() * 3 / 5))
     # p = Process(target=_run_algo, args=(start,
     #                                     end,
     #                                     benchmark_spec,

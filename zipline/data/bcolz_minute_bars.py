@@ -37,7 +37,7 @@ from zipline.data._minute_bar_internal import (
     minute_value,
 )
 from zipline.data.bar_reader import BarReader, NoDataForSid, NoDataOnDate
-from zipline.data.bcolz_daily_bars import check_uint32_safe
+from zipline.data.bcolz_daily_bars import check_uint32_safe, check_uint64_safe
 from zipline.gens.sim_engine import NANOS_IN_MINUTE
 from zipline.utils.calendar_utils import get_calendar
 from zipline.utils.cli import maybe_show_progress
@@ -142,7 +142,7 @@ def convert_cols(cols, scale_factor, sid, invalid_data_behavior):
         max_val = scaled_col.max()
 
         try:
-            check_uint32_safe(max_val, col_name)
+            check_uint64_safe(max_val, col_name)
         except ValueError:
             if invalid_data_behavior == "raise":
                 raise
@@ -163,7 +163,7 @@ def convert_cols(cols, scale_factor, sid, invalid_data_behavior):
     # Convert all cols to uint32.
     ret = []
     for x in cols:
-        col = scaled_cols.get(x, cols[x]).astype(np.uint32)
+        col = scaled_cols.get(x, cols[x]).astype(np.uint64)
         col[exclude_mask] = 0
         ret.append(col)
     return ret

@@ -18,7 +18,8 @@ parser.add_argument('--type', type=str, default='algo', help='操作类型：sta
 parser.add_argument('--parallel', action='store_true', help="启用按天并行回测")
 parser.add_argument('--days', type=int, default=60, help='type为gen_test有效，生成多少天的数据，非必填', required=False)
 parser.add_argument('--decompress_file', type=str, default='trade_data.csv.tar.bz2', help='解压的文件名，在type为decompress时生效', required=False)
-parser.add_argument('--rootdir', type=str, default='/data/sse/', help='数据根目录，默认/data/sse/', required=False)
+parser.add_argument('--filter_stock', type=str, default='', help='type为statistic时，指定过滤的股票代码开头,如需要只要00和60开头的股票，则配置“00,60”', required=False)
+parser.add_argument('--rootdir', type=str, default='/data/sse/', help='数据根目录，多个目录用“,”号分隔，默认/data/sse/', required=False)
 parser.add_argument('--csvdir', type=str, default='./minute', help='生成的秒级数据目录，默认./minute', required=False)
 parser.add_argument('--tempdir', type=str, default='/data/zipline/tmp/', help='zipline ingest过程中的临时目录，默认/data/zipline/tmp/', required=False)
 parser.add_argument('--zipline_root', type=str, default='/data/zipline', help='zipline数据的目录，默认/data/zipline', required=False)
@@ -30,16 +31,17 @@ if __name__ == '__main__':
     start_time = time.time()
     run_type = args.type
     if run_type == 'statistic':
-        logger.info(f'开始统计trade.csv，起始日期：{args.start}, 结束日期：{args.end}，保存到{args.csvdir}')
+        logger.info(f'开始统计trade.csv，起始日期：{args.start}, 结束日期：{args.end}，保存到{args.csvdir}，原始数据：{args.rootdir}')
         start_date, end_date = args.start, args.end
-        statistic_trade(start_date, end_date, args.csvdir, args.rootdir)
+        statistic_trade(start_date, end_date, args.csvdir, args.rootdir.split(','), args.filter_stock.strip().split(','))
+        run_type = 'ingest'
     elif run_type == 'decompress':
         logger.info(f'开始解压trade.csv，保存到{args.rootdir}')
-        logger.info(decompress_dir(args.rootdir, 0, 0, args.decompress_file, 'trade.csv'))
+        logger.info(decompress_dir(args.rootdir, 0, 0, args.decompress_file, 'entrust_data.csv'))
     elif run_type == 'gen_test':
         logger.info(f'准备生成测试数据，共{args.days}天')
         gen_stock(args.days)
-    elif run_type == 'ingest':
+    if run_type == 'ingest':
         logger.info(f'开始执行ingest操作，原始csv数据在{args.csvdir}, 保存到{args.zipline_root}，字段为{args.fields}')
         # 环境变量的设置要在zipline库引入之前
         os.environ["CSVDIR"] = os.path.dirname(args.csvdir)  # NOQA: E402

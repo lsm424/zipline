@@ -48,10 +48,15 @@ US_EQUITY_PRICING_BCOLZ_COLUMNS = (
 )
 
 UINT32_MAX = np.iinfo(np.uint32).max
+UINT64_MAX = np.iinfo(np.uint64).max
 
 
 def check_uint32_safe(value, colname):
     if value >= UINT32_MAX:
+        raise ValueError("Value %s from column '%s' is too large" % (value, colname))
+    
+def check_uint64_safe(value, colname):
+    if value >= UINT64_MAX:
         raise ValueError("Value %s from column '%s' is too large" % (value, colname))
 
 
