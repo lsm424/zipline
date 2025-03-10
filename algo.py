@@ -59,6 +59,7 @@ def initialize(context):
 def handle_data(context, data):
     context.i += 1
     start = time()
+
     # 当前帧股价，data.current 返回dataframe，索引为股票对象sym， value列就是传入的price等其他ohlc， price==close
     prices = data.current(context.syms, 'price')
     prices = prices[prices.notnull()]
@@ -67,7 +68,10 @@ def handle_data(context, data):
         return
 
     # 获得真实时间
-    real_time = datetime.fromtimestamp(data.current(prices.index[0], 'real_time'))
+    timestampe = data.current(prices.index[0], 'real_time')
+    if np.isnan(timestampe):
+        return
+    real_time = datetime.fromtimestamp(timestampe)
 
     # 如果是新的一天，则更新records中的涨停价、跌停价，以及其他字段初始化
     cur_date = real_time.date()

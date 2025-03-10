@@ -67,7 +67,7 @@ def gen_fake_data(times: int, limit_up_price: float, stock: str):
     last_limit_up_price = last_row["LimitUpPrice"]
     new_time = (datetime.strptime(last_time, "%H%M%S") + pd.Timedelta(seconds=1)).strftime("%H%M%S")
 
-    new_rows.append([2011, 1, stock, new_time, last_limit_up_price - 1, 10000])
+    new_rows.append([2011, 1, stock, new_time, last_limit_up_price - 1000, 10000])
 
     # 第二行: LimitUpPrice 等于原值，时间递增
     new_time = (datetime.strptime(new_time, "%H%M%S") + pd.Timedelta(seconds=1)).strftime("%H%M%S")
@@ -84,7 +84,7 @@ if __name__ == '__main__':
 
     # 测试函数
     times = 1801
-    limit_up_price = 10.46
+    limit_up_price = 11.88 * 10000
     stock = "000001"
     df = gen_fake_data(times, limit_up_price, stock)
     print(df)

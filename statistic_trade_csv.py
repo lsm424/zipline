@@ -195,6 +195,7 @@ def analys_vaxe(file, date=None, base_second=None, idx=0, resultdir='minute', fi
         df = df[filter_condition]
         logger.info(f'[{idx}]{file} filter time {df.shape} {time.time() - start}')
         # 统计hlocv
+        df['price'] /= (1000 if 'sse' in file else 10000)  # sh的价格除以1000，sz的价格除以10000
         df = df.sort(by=['stock', 'time_sec'], ascending=True)
         df = df.groupby(['stock', 'time_sec'], agg={
             'high': vaex.agg.max('price'),         # 最大的value
@@ -203,10 +204,7 @@ def analys_vaxe(file, date=None, base_second=None, idx=0, resultdir='minute', fi
             'close': vaex.agg.last('price'),   # time最大对应的value
             'volume': vaex.agg.sum('volume'),          # value的总和
         })
-        df['high'] /= 1000
-        df['low'] /= 1000
-        df['open'] /= 1000
-        df['close'] /= 1000
+
         # 计算真实时间的秒数
         df['real_time'] = df['time_sec'] + date_second
         df = df.drop('time_sec')

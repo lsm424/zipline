@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 pattern = r'^\S+\s+(\d+)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(\d+)\s+(\[.*?\])\s+(\d+\.\d+)'
 
-os.system('grep -nR 二次不满足买入的数据 zipline.log -A 2|grep -v 二次不满足买入的数据 > no.txt')
+os.system('grep -nR 二次不满足买入的数据 zipline.log -A 5|grep -v 二次不满足买入的数据 > no.txt')
 data = open('no.txt', 'r').read().split('\n')
 all_cnt = 0
 first_time_cnt = 0
@@ -24,7 +24,7 @@ for line in data:
     volume_list = ast.literal_eval(volume_list)
     volume = float(volume)
     all_cnt += 1
-    if first_time.time() < tm:
+    if first_time.time() > tm:
         first_time_cnt += 1
     if count < 1800:
         count_cnt += 1
